@@ -642,12 +642,27 @@ npm run pass2
 #    measured_at  (SQL: select * from public.refresh_fanout();  then upsert
 #    registry_stats — see apps/indexer/sql/004_fanout.sql)
 
-# 5. REGENERATE THE OG CARD — see below
+# 5. REGENERATE THE OG CARD — see below.
+#    genog.mjs reads /tmp/og_stats.json, NOT Supabase. Dump it first or the
+#    script dies with ENOENT.
+curl -s "$SUPABASE_URL/rest/v1/registry_stats?select=key,value,measured_at,note&order=key.asc" \
+  -H "apikey: $SUPABASE_SERVICE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+  > /tmp/og_stats.json
 cd apps/web && npx tsx genog.mjs
 
-# 6. Push the new data to the live site
+# 6. Redeploy. The card is a build asset; step 7 cannot update it.
+git add app/opengraph-image.png app/twitter-image.png && git commit && git push
+
+# 7. Push the new data to the live site
 curl -X POST -H "Authorization: Bearer $REVALIDATE_SECRET" \
   https://agensea-navy.vercel.app/api/revalidate
+
+# 8. Verify by CONTENT — see below. Not deploy status, and not a local build.
+#    Substitute the ceiling this sweep just wrote.
+curl -s https://agensea-navy.vercel.app/docs | grep -c '341,288'
+#    And confirm the served card IS the one you just built, by bytes:
+curl -s https://agensea-navy.vercel.app/opengraph-image.png | shasum -a256
+shasum -a256 apps/web/app/opengraph-image.png    # must match
 ```
 
 ### The OG card drifts silently — this is the one to remember
@@ -665,3 +680,70 @@ it, and only one of them is visible in the app.
 
 A redeploy is required after regenerating: the card is a build asset, not an
 ISR page, so `/api/revalidate` does **not** update it.
+
+### Verify by content — and a local build is not content
+
+The card above is the visible half of a general rule: **check what the deployed
+site actually serves.** Not deploy status, not a green build. The case that
+caught us was subtler than the card, because it looks exactly like verification.
+
+`npm run build` locally does **not** give a faithful preview of any ISR page.
+Next caches data fetches in `.next/cache/fetch-cache` keyed by the route's
+`revalidate`, and `lib/queries.ts` reads `registry_stats` with `revalidate: DAY`.
+So a local build replays whatever response was cached, for up to 24 hours,
+regardless of what the database now says.
+
+On 8 Sep this produced a prerendered `/docs` carrying the 31 Aug ceiling
+(322,974) an hour after the sweep had written 341,288 — and silently omitted an
+entire conditional block, because the `registry_stats` keys it tests for did not
+exist when the cache entry was written. The build succeeded. Nothing warned. The
+page looked verified and was a week stale.
+
+```bash
+rm -rf apps/web/.next/cache/fetch-cache   # before any build you intend to trust
+```
+
+**Vercel is unaffected** — its builds start from a clean data cache, which is why
+the deployed site was correct throughout while the local build was wrong. That
+asymmetry is the whole trap: the local build is the one that lies, and it is the
+one you are tempted to believe because you just ran it.
+
+### `refresh_fanout()` cannot be called through PostgREST
+
+Step 4 says SQL and it means SQL. `POST /rest/v1/rpc/refresh_fanout` fails with:
+
+```json
+{"code":"21000","message":"DELETE requires a WHERE clause"}
+```
+
+The function opens with unqualified `delete from public.client_fanout;` and
+`delete from public.agent_fanout_curve;`, and PostgREST connects as the
+`authenticator` role, which carries:
+
+```
+authenticator => session_preload_libraries=supautils, safeupdate
+               | statement_timeout=8s | lock_timeout=8s
+```
+
+`safeupdate` is preloaded per session, so it is in force inside the function
+body too. Nothing in the SQL is wrong; adding `where true` to silence it would
+be defeating a safety net rather than using the right door. Note the second
+reason on that same line: `statement_timeout=8s` — a full curve rebuild over
+109 clients has no business racing an 8-second budget either.
+
+Run it from the Supabase SQL editor, `psql`, or an MCP `execute_sql`. Those
+connect as a role without the preload, and it returns
+`(clients_out, breakpoints_out)` in well under a second.
+
+### `genog.mjs` reads a file nothing creates
+
+The script takes its figures from `/tmp/og_stats.json`, not from Supabase. No
+step in this runbook wrote that file, so a clean run died with:
+
+```
+Error: ENOENT: no such file or directory, open '/tmp/og_stats.json'
+```
+
+Step 5 above now dumps it. It must be the raw PostgREST array — the script
+indexes it by `key` and reads `agents_minted.measured_at` for the `measured …`
+date printed on the card.
