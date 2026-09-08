@@ -63,20 +63,29 @@ for (let from = 0; ; from += 1000) {
   if (rows.length < 1000) break;
 }
 
-// minted_per_day, derived from the previously recorded ceiling and its date
-const { data: prev } = await withRetry('prev minted', () =>
-  db.from('registry_stats').select('value,measured_at').eq('key', 'agents_minted').maybeSingle());
-const prevVal = Number(prev?.value);
-const prevAt = new Date(String(prev?.measured_at)).getTime();
-const now = new Date();
-const days = (now.getTime() - prevAt) / 86_400_000;
-const perDay = days > 0 ? Number(((ceiling - prevVal) / days).toFixed(1)) : null;
+// minted_per_day, over a FIXED long baseline rather than "since last time".
+//
+// Chaining off the previous measurement makes the window as short as the gap
+// between sweeps. Two sweeps four hours apart produced 1,216/day against the
+// 2,292/day published the day before — a reader sees the registry halving when
+// nothing changed on chain. The rate is a trend, so it needs a trend-length
+// window, and the window has to be visible next to the number.
+//
+// Anchor: the 31 Aug 2026 sweep. Both halves are evidenced — the value and its
+// timestamp are what registry_stats carried before today, and the keepalive
+// health check echoed the same pair all week.
+const BASELINE = { value: 322_974, at: '2026-08-31T15:35:59.059966Z' };
 
-log(`\n  agents_minted     ${prevVal} -> ${ceiling}`);
+const now = new Date();
+const days = (now.getTime() - new Date(BASELINE.at).getTime()) / 86_400_000;
+const perDay = days > 0 ? Number(((ceiling - BASELINE.value) / days).toFixed(1)) : null;
+const windowDays = Number(days.toFixed(2));
+
+log(`\n  agents_minted                   ${ceiling}`);
 log(`  agents_with_client              ${withClient}`);
 log(`  distinct_clients                ${distinctClients}`);
 log(`  client_edges                    ${edges}`);
-log(`  minted_per_day                  ${perDay}  (over ${days.toFixed(3)} days)`);
+log(`  minted_per_day                  ${perDay}  (${ceiling - BASELINE.value} new ids over ${windowDays} days)`);
 
 // ---- 2b. if the refresh could not run, prove it was unnecessary -------------
 const { data: stored } = await withRetry('stored stats', () =>
@@ -104,7 +113,10 @@ const rows = [
 ];
 if (perDay !== null) {
   rows.push({ key: 'minted_per_day', value: perDay, measured_at: at,
-    note: `derived: (ceiling - ${prevVal}) / days since the previous sweep` });
+    note: `derived: ${ceiling - BASELINE.value} new ids over ${windowDays} days since the ${BASELINE.at.slice(0, 10)} sweep (${BASELINE.value})` });
+  // Published as its own key so the page can show the basis beside the rate.
+  rows.push({ key: 'minted_per_day_days', value: windowDays, measured_at: at,
+    note: `window length for minted_per_day, in days` });
 }
 const { error: upErr } = await withRetry('upsert registry_stats', () =>
   db.from('registry_stats').upsert(rows, { onConflict: 'key' }));
