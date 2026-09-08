@@ -62,7 +62,7 @@ export async function SiteFooter() {
             <Link href="/docs">Docs</Link>
             <Link href="/claim">List your agent</Link>
             <a href="https://github.com/shrooms08/agensea" target="_blank" rel="noreferrer">GitHub</a>
-            <a href="https://x.com/shroomsgotsol" target="_blank" rel="noreferrer">X</a>
+            <a href="https://x.com/agensea_market" target="_blank" rel="noreferrer">X</a>
           </nav>
         </div>
         <p className="footer-facts">
