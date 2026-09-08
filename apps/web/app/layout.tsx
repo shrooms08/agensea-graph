@@ -48,6 +48,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
+    // Without these a shared link attributes to no account at all.
+    site: '@agensea_market',
+    creator: '@agensea_market',
     title: 'AgenSea — most agents on chain have never been used',
     description:
       'A marketplace and registry explorer for ERC-8004 on BNB Chain. Every figure measured, '
