@@ -35,6 +35,13 @@ are computed from those measured values.
 - **B402 Bazaar:** **978** resources from **7** payees, one payee holding
   **96.22%** of the catalogue — measured 31 Aug 2026
 - **Exactly one** agent address appears in both datasets — measured 31 Aug 2026
+- **The Studio path reaches our index:** an agent scaffolded with BNB Agent
+  Studio, deployed to AWS AgentCore and registered with `bag erc8004 register`,
+  is in the registry we sweep — agent **341493** on chain 56, owner
+  `0xCBEF…e002`, indexed 18:43 UTC on 8 Sep 2026. It is a **scaffold running the
+  default free model**: it does no useful work, and it exists only to test the
+  registry path end to end. It is not hireable through AgenSea — our hire path
+  is on 97.
 
 ### Cross-checked against 8004scan (surveyed 1 Sep 2026)
 
