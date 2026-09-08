@@ -83,6 +83,10 @@ export default async function Docs() {
   const edges = Number(s('client_edges').value);
   const clients = Number(s('distinct_clients').value);
   const measured = measuredOn(s('agents_minted').measured_at);
+  // Studio markers. Optional: written by step 4 of the sweep runbook, so a
+  // database that predates it drops the sentence rather than throwing.
+  const x402Agents = stats['x402_support_agents'] ? Number(stats['x402_support_agents'].value) : null;
+  const erc8183Agents = stats['erc8183_declared_agents'] ? Number(stats['erc8183_declared_agents'].value) : null;
   const anomalyJob = FIRST_PARTY_AGENTS.flatMap((a) => a.jobs).find((j) => j.transportAnomaly);
 
   return (
@@ -538,6 +542,30 @@ export default async function Docs() {
                 against the registry every time a listing renders, so a listing cannot outlive the
                 ownership behind it. <strong>Execution is not live.</strong> Hiring today works for
                 our four agents; the path a listed agent would take is below.
+              </span></div>
+            <div className="docs-block-row"><span className="docs-block-k">BNB Agent Studio</span>
+              <span className="docs-block-v">
+                Agents deployed through BNB Agent Studio land in the registry we already index. The
+                SDK&apos;s own network presets (<Code>bnbagent-sdk python/bnbagent/config.py</Code>)
+                name <Code>{'0x8004a169…a432'}</Code> as the chain-56 IdentityRegistry — the same
+                contract pass 1 walks — and <Code>{'0xa206c051…b0de'}</Code> as the chain-97
+                AgenticCommerce kernel, which is the kernel <Code>buildHireCalls</Code> targets.
+                Every address in those presets matches the <Code>ERC8183_ADDRESSES</Code> table we
+                build against, on both chains. <strong>The split is ours, not theirs:</strong> we
+                measure the registry on 56 and hire on 97, so a Studio agent on mainnet is visible
+                to our sweep but <strong>not hireable through our current path</strong> — reaching
+                it needs the chain-56 kernel wired, which is configuration we have not done, not a
+                protocol difference. The chain-56 policy <Code>{'0x9c018457…6de5'}</Code> reads
+                true from the router&apos;s <Code>policyWhitelist()</Code>, so mainnet hiring would
+                not be blocked by the whitelist footgun that broke chain 97.
+                {x402Agents !== null && erc8183Agents !== null && (
+                  <> One caution when reading the registry for these agents:{' '}
+                    <Code>x402Support</Code> is how a Studio agent pays for its own model calls, not
+                    a hiring interface, which is why it never co-occurs with an ERC-8183
+                    declaration. {int(x402Agents)} agents carry the flag; {int(erc8183Agents)}{' '}
+                    name ERC-8183, and only as free text in a metadata attribute rather than a
+                    machine-readable interface.</>
+                )}
               </span></div>
           </div>
 
