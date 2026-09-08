@@ -570,7 +570,24 @@ export default async function Docs() {
                     well as what is actually registered. A URI that times out on one sweep and
                     answers on the next moves the number by ±1 with nothing having changed on
                     chain. Every other figure here is a contract read.</>
-                )}
+                )}{' '}
+                <strong>Their buy path is our buy path.</strong> <Code>bag erc8183 buy</Code> runs
+                the same four kernel entry points in the same order — <Code>createJob</Code>,{' '}
+                <Code>registerJob</Code>, <Code>setBudget</Code>, <Code>fund</Code> — against these
+                contracts. Ours is five calls rather than four only because it sends the ERC-20
+                approve as its own unconditional call before <Code>fund</Code>, where Studio folds
+                the approve into <Code>fund</Code> and skips it when the budget is zero. A CLI
+                built by the chain&apos;s own tooling making the same calls in the same order is
+                better evidence that a Studio agent is hireable in principle than any matching
+                address table. Settlement timing, though, belongs to the deployment rather than the
+                protocol: the OptimisticPolicy we share with Studio on chain 97 reports{' '}
+                <Code>disputeWindow()</Code> = {DISPUTE_WINDOW_SECONDS} s, while the chain-56 policy
+                the same SDK ships reports 604,800 s — seven days. Approving before the window
+                closes reverts either way. So the identical code settles a mainnet job a week after
+                submission and a testnet job {DISPUTE_WINDOW_SECONDS} seconds after it. One scope
+                note, from Studio&apos;s own documentation: v1 is seller-only, buyer-side product
+                flows are deferred to v2, and the buy path above survives as a CLI capability
+                rather than something a deployed Studio agent does for you.
               </span></div>
           </div>
 
