@@ -16,4 +16,9 @@ next-env.d.ts
 # Vercel
 .vercel/
 
+# Agent tooling installed into the repo, not part of the project.
+# `bag skills install` (BNB Agent Studio CLI) writes 16 skill documents plus a
+# .bag-meta.json here. Useful locally, noise in a submission.
+.claude/
+
 *.tsbuildinfo
