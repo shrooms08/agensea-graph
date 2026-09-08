@@ -53,7 +53,11 @@ export default async function AgentDetail({ params }: { params: Promise<{ id: st
   if (!agent && !overlap && !bare) notFound();
 
   const a = (agent ?? overlap ?? bare)!;
-  const isOverlap = !agent;
+  // TWO DIFFERENT THINGS, and conflating them put 127417's copy on every
+  // zero-client page. `!agent` only means "absent from the client-bearing
+  // view"; being the B402 payee overlap is the narrower `overlap` hit.
+  const notInLivenessSet = !agent;
+  const isB402Overlap = !agent && !!overlap;
   const tone = `var(${livenessToken(a.client_count)})`;
   // First-party cross-link: presentation only. The row is untouched sweep
   // output — client_count, liveness filters, ordering and Pass 2 selection
@@ -80,15 +84,19 @@ export default async function AgentDetail({ params }: { params: Promise<{ id: st
           </div>
         )}
 
-        {isOverlap && (
+        {notInLivenessSet && (
           <div style={{ marginTop: 18, padding: '14px 18px', background: 'var(--surface-raised)', boxShadow: 'inset 2px 0 0 var(--warn)' }}>
             <div style={{ font: "500 10px/1 var(--mono)", letterSpacing: '0.12em', color: 'var(--warn)', textTransform: 'uppercase' }}>
               Not in the liveness set
             </div>
             <p className="prose-sm prose-muted" style={{ marginTop: 8, fontSize: 13 }}>
               This agent has zero clients, so it is absent from the fan-out curve and from every
-              agent count on this site. It is here because it is the only B402 Bazaar payee that
-              also holds an ERC-8004 identity — revenue without reputation.
+              agent count on this site.
+              {isB402Overlap
+                ? <> It is here because it is the only B402 Bazaar payee that also holds an
+                  ERC-8004 identity — revenue without reputation.</>
+                : <> It is reachable by id because the registry has it; nothing else on this site
+                  counts it.</>}
             </p>
           </div>
         )}
