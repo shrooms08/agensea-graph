@@ -114,9 +114,9 @@ in-browser path are in [/docs](https://agensea-navy.vercel.app/docs#how-to-verif
 
 ## Upstream issues filed
 
-Authored by `shrooms08` (GitHub shows the authorship). **Three of the four are
-now fixed upstream** — #57, #58 and #59 — and all three shipped in
-`@altananetwork/sdk` **0.9.0**, published 2 Sep 2026.
+Authored by `shrooms08` (GitHub shows the authorship). **Five findings filed,
+three fixed** — #57, #58 and #59 all shipped in `@altananetwork/sdk` **0.9.0**,
+published 2 Sep 2026. The two open ones are against `bnb-chain/bnbagent-sdk`.
 
 **Two of the three merges cite our own on-chain transactions as their
 verification.** [#66](https://github.com/altananetwork/altana-sdk/pull/66)
@@ -174,6 +174,17 @@ failed three ways, not the two we described.
   jobId race: provider + status cannot identify your own job, so a losing racer
   can submit a valid-hash deliverable for the wrong task (the hire route guards
   against this by re-reading the job's description after funding)
+- [bnb-chain/bnbagent-sdk #86](https://github.com/bnb-chain/bnbagent-sdk/issues/86) —
+  the BNB Agent Studio buyer skill (`buying-via-8183.md`) documents a 24 h
+  ERC-8183 dispute window in six places, one of them labelled a *protocol fact*.
+  `disputeWindow()` on the policies that `config.py` itself ships returns **900 s
+  on chain 97** and **604,800 s on chain 56** — neither is 24 h, and the error
+  runs in opposite directions, so no single constant fixes it. A buyer following
+  the doc idles a day on a testnet job that was settleable in fifteen minutes,
+  and on mainnet approves six days early into a revert. Same class as
+  [altana-sdk #53](https://github.com/altananetwork/altana-sdk/issues/53): a
+  shipped constant the deployed contract contradicts. Both windows re-read here
+  before filing; the 900 s figure is the one `/docs` renders.
 
 Confirmed on chain, not authored by us:
 
