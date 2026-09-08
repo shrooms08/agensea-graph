@@ -564,7 +564,12 @@ export default async function Docs() {
                     a hiring interface, which is why it never co-occurs with an ERC-8183
                     declaration. {int(x402Agents)} agents carry the flag; {int(erc8183Agents)}{' '}
                     name ERC-8183, and only as free text in a metadata attribute rather than a
-                    machine-readable interface.</>
+                    machine-readable interface. <strong>That flag count is the one figure on this
+                    page that is not purely on-chain:</strong> it is read from metadata behind a
+                    tokenURI, so it tracks how many of those URIs pass 2 could resolve over HTTP as
+                    well as what is actually registered. A URI that times out on one sweep and
+                    answers on the next moves the number by ±1 with nothing having changed on
+                    chain. Every other figure here is a contract read.</>
                 )}
               </span></div>
           </div>
