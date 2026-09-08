@@ -589,6 +589,18 @@ export default async function Docs() {
                 flows are deferred to v2, and the buy path above survives as a CLI capability
                 rather than something a deployed Studio agent does for you.
               </span></div>
+            <div className="docs-block-row"><span className="docs-block-k">verified end to end</span>
+              <span className="docs-block-v">
+                We deployed one. An agent scaffolded with BNB Agent Studio, shipped to AWS
+                AgentCore and registered with <Code>bag erc8004 register</Code>, appears in the
+                registry this site indexes: <Link href="/agents/341493" style={{ color: 'var(--live)' }}>agent
+                341493</Link> on chain 56, owner <Code>0xCBEF…e002</Code>, picked up by our sweep at
+                18:43 UTC on 8 Sep 2026. <strong>It is a scaffold running the default free model.</strong>{' '}
+                It does no useful work and we are not presenting it as a product — it exists to test
+                the registry path end to end, and the only claim it supports is that the path works.
+                It is not hireable through AgenSea for the reason above: our hire path is on 97, and
+                Studio settles on whichever chain it was configured for.
+              </span></div>
           </div>
 
           <h3 className="docs-h3">What it takes to become hireable</h3>
