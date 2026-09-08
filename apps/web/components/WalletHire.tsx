@@ -9,9 +9,10 @@
  * The buyer is the connected wallet, not the platform: approve -> create
  * (createJob + registerJob + setBudget) -> fund, as sequential wallet
  * transactions with a stage indicator, then POST /api/agent-work so the
- * agent analyses and submits through its session key. jobId is claimed by
- * reading jobCounter first and verified after createJob by matching our
- * unique description nonce (walking ±3 if a race lost the slot).
+ * agent analyses and submits through its session key. jobId is read from the
+ * JobCreated log in our OWN createJob receipt — the transaction we sent cannot
+ * report someone else's job — and then re-checked against the kernel for our
+ * description nonce and address before anything is funded.
  *
  * The buyer's target is validated for format in the browser and against chain
  * state on the server BEFORE any transaction is offered, then written into the
@@ -32,6 +33,43 @@ import { HirePreflight, useWalletFunding } from '@/components/HirePreflight';
 import { GRID_POOLS, MEASURED_GAS, validateTarget, type DeliversRow, type TargetSpec } from '@/data/hire-spec';
 import { DISPUTE_WINDOW_SECONDS } from '@/data/first-party-agents';
 import { receiptByHash } from '@/lib/wallet/receipt';
+
+/**
+ * The jobId of the job THIS transaction created.
+ *
+ * Verified against the commerce implementation's own ABI (chain 97,
+ * 0x153783dd…7815) and against three receipts from two different client
+ * wallets, not inferred from one sample:
+ *
+ *   JobCreated(uint256 jobId, address client, address provider,
+ *              address evaluator, uint256 expiredAt, address hook)
+ *   indexed: jobId, client, provider
+ *   topic0 = 0xb0f0239bfdd96453e24733e18bfc24b70d8fadf123dd977473518dd577ee79b9
+ *
+ * Reading our own receipt removes the jobId race entirely for the buyer: the
+ * log is emitted by the transaction we sent, so it cannot describe someone
+ * else's job. `client` is asserted anyway, because a topic layout is a fact
+ * about a deployment and deployments change.
+ */
+const JOB_CREATED_TOPIC0 = '0xb0f0239bfdd96453e24733e18bfc24b70d8fadf123dd977473518dd577ee79b9';
+
+async function jobIdFromReceipt(
+  hash: `0x${string}`,
+  buyer: string,
+  read: (h: `0x${string}`) => Promise<{ logs: readonly { address: string; topics: readonly string[] }[] }>,
+): Promise<bigint> {
+  const receipt = await read(hash);
+  const log = receipt.logs.find((l) =>
+    l.address.toLowerCase() === ERC8183.commerce.toLowerCase() && l.topics[0] === JOB_CREATED_TOPIC0);
+  if (!log || log.topics.length < 3) {
+    throw new Error('created the job but could not read its id from the receipt — nothing was funded; it is safe to retry');
+  }
+  const client = ('0x' + log.topics[2]!.slice(26)).toLowerCase();
+  if (client !== buyer.toLowerCase()) {
+    throw new Error('the job in that receipt belongs to another address — nothing was funded; it is safe to retry');
+  }
+  return BigInt(log.topics[1]!);
+}
 
 /** Truncate without cutting a hash in half: break at whitespace, not mid-token. */
 function clip(s: string, max: number): string {
@@ -172,7 +210,7 @@ export function WalletHire({ agentId, agentName, priceLabel, mode, initialTarget
   };
   const mark = (id: number, patch: Partial<TxStep>) => setSteps((p) => p.map((s) => (s.id === id ? { ...s, ...patch } : s)));
 
-  async function sendStep(label: string, fn: () => Promise<`0x${string}`>): Promise<void> {
+  async function sendStep(label: string, fn: () => Promise<`0x${string}`>): Promise<`0x${string}`> {
     // A seeded row is marked in place; anything else (the reclaim) still appends.
     const seeded = (HIRE_STEPS as readonly string[]).indexOf(label);
     const i = seeded >= 0 ? seeded : push(label);
@@ -183,6 +221,7 @@ export function WalletHire({ agentId, agentName, priceLabel, mode, initialTarget
       mark(i, { tx, state: 'confirming' });
       await pub!.waitForTransactionReceipt({ hash: tx, timeout: 90_000 });
       mark(i, { state: 'done' });
+      return tx;
     } catch (e) {
       const msg = String((e as Error).message);
       const rejected = /reject|denied|4001/i.test(msg);
@@ -199,7 +238,7 @@ export function WalletHire({ agentId, agentName, priceLabel, mode, initialTarget
       const timedOut = /timed out|timeout/i.test(msg) && !!tx;
       if (timedOut) {
         const look = await receiptByHash(tx!);
-        if (look.kind === 'mined' && look.success) { mark(i, { state: 'done' }); return; }
+        if (look.kind === 'mined' && look.success) { mark(i, { state: 'done' }); return tx!; }
         if (look.kind === 'mined') {
           mark(i, { state: 'failed' });
           throw new Error(`${name} reverted on chain — nothing further was sent`);
@@ -265,22 +304,25 @@ export function WalletHire({ agentId, agentName, priceLabel, mode, initialTarget
       // stage 2: create (createJob + registerJob + setBudget)
       const nonce = crypto.randomUUID();
       const description = JSON.stringify({ wallet: true, agentId, target: check.value, nonce, at: Date.now() });
-      const counter = (await pub.readContract({ address: ERC8183.commerce, abi: COMMERCE_ABI, functionName: 'jobCounter' })) as bigint;
-      let expected = counter + 1n;
-      await sendStep(HIRE_STEPS[1], () => writeContractAsync({
+      const createTx = await sendStep(HIRE_STEPS[1], () => writeContractAsync({
         address: ERC8183.commerce, abi: COMMERCE_ABI, functionName: 'createJob',
         args: [ERC8183.registryProvider, ERC8183.router, BigInt(Math.floor(Date.now() / 1000) + 3600), description, ERC8183.router], chainId: bscTestnet97.id }));
-      // confirm which id is ours (jobId race): match the nonce
-      let found: bigint | null = null;
-      for (const cand of [expected, expected + 1n, expected + 2n, expected + 3n, expected - 1n]) {
-        if (cand <= 0n) continue;
-        try {
-          const j = (await pub.readContract({ address: ERC8183.commerce, abi: COMMERCE_ABI, functionName: 'getJob', args: [cand] })) as { description: string; client: string };
-          if (j.description === description && j.client.toLowerCase() === address.toLowerCase()) { found = cand; break; }
-        } catch { /* keep walking */ }
+
+      // WHICH ID IS OURS: read it from OUR OWN transaction's receipt. The kernel
+      // emits JobCreated(uint256 jobId, address client, address provider, ...)
+      // with the first three indexed, so topic1 is the id and topic2 is the
+      // client. Our own receipt cannot be another buyer's job, which is what the
+      // old jobCounter()+1 guess and its candidate walk were working around.
+      const expected = await jobIdFromReceipt(createTx, address, (h) => pub.getTransactionReceipt({ hash: h }));
+
+      // SECOND GATE, not a replacement. The event says which id; the kernel must
+      // agree that this id carries OUR description and OUR address. If the two
+      // disagree, something is wrong that we do not understand — stop, before
+      // anything is funded, rather than binding a budget to a stranger's job.
+      const j = (await pub.readContract({ address: ERC8183.commerce, abi: COMMERCE_ABI, functionName: 'getJob', args: [expected] })) as { description: string; client: string };
+      if (j.description !== description || j.client.toLowerCase() !== address.toLowerCase()) {
+        throw new Error(`job ${expected} does not match what we created — nothing was funded; it is safe to retry`);
       }
-      if (!found) throw new Error('could not locate the created job on chain — nothing was funded; it is safe to retry');
-      expected = found;
       setJobId(String(expected));
       await sendStep(HIRE_STEPS[2], () => writeContractAsync({
         address: ERC8183.router, abi: ROUTER_ABI, functionName: 'registerJob', args: [expected, ERC8183.policy], chainId: bscTestnet97.id }));
