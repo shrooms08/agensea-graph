@@ -169,7 +169,11 @@ failed three ways, not the two we described.
   credits the cross-language hash trap we reported — which it found in its own
   demo script: a hand-rolled canonicaliser missing the `\uXXXX` escaping,
   hashing a report containing an em dash. It shipped in 0.9.0 on 2 Sep; we are
-  on `^0.8.0` and have not migrated, six days from submission.
+  on `^0.8.0` and have not migrated, six days from submission. Independent
+  corroboration that the gap was real and general, not our misreading: BNB Agent
+  Studio's own seller hand-rolls its deliverable submit in
+  `app/agent/src/signing.ts` rather than calling the SDK, and pins
+  `@altananetwork/sdk@0.7.1`.
 - [bnb-chain/bnbagent-sdk #82](https://github.com/bnb-chain/bnbagent-sdk/issues/82) —
   jobId race: provider + status cannot identify your own job, so a losing racer
   can submit a valid-hash deliverable for the wrong task (the hire route guards
