@@ -546,17 +546,29 @@ We looked at `wallet_sendCalls` to collapse the five hire transactions
 tooling is not the obstacle: wagmi 3.7.7 already exports `useSendCalls`,
 `useCapabilities`, `useCallsStatus` and `useWaitForCallsStatus`.
 
-**The blocker is that ERC-8183 has no caller-scoped or deterministic job id.**
-Three of the five calls take a `jobId` that does not exist until `createJob`
-lands. We read `jobCounter()` for a guess, send `createJob`, then walk candidate
-ids matching our unique description nonce and the buyer's address to learn which
-id is actually ours — the guard against the race in
-[bnbagent-sdk #82](https://github.com/bnb-chain/bnbagent-sdk/issues/82), where
-provider and status cannot identify your own job. A batch has to be built before
-any of it executes, so it would have to assume `counter + 1` is ours. That is
-precisely the assumption the guard exists to defeat: lose the race inside an
-atomic batch and the whole hire reverts; lose it inside a non-atomic batch and
-the budget and funds bind to somebody else's job.
+**The blocker is that the jobId does not exist until `createJob` executes.**
+Three of the five calls take it, and a batch has to be built before any of it
+runs, so a batched hire would have to assume `counter + 1` is ours — and lose
+the race to another buyer funding between the read and the send. Lose it inside
+an atomic batch and the whole hire reverts; lose it inside a non-atomic batch
+and the budget and funds bind to somebody else's job.
+
+> **Corrected 8 Sep 2026.** This entry used to say ERC-8183 has "no
+> caller-scoped or deterministic job id". That is false. `createJob` emits
+> `JobCreated(uint256 jobId, address client, address provider, …)` with the
+> first three parameters **indexed**, so the id is in `topic1` of a log our own
+> transaction produced, keyed by client in `topic2`. The buyer now reads it
+> straight from that receipt, and the `jobCounter()` guess and its
+> `[+0,+1,+2,+3,−1]` candidate walk are gone; the description-nonce check
+> survives as a second gate. What the id *is* was never the problem — *when* it
+> exists is, and that is unchanged, so the conclusion below stands.
+>
+> The related report,
+> [bnbagent-sdk #82](https://github.com/bnb-chain/bnbagent-sdk/issues/82), is
+> about a **provider** sweeping FUNDED jobs, where provider and status genuinely
+> cannot single out one job. The event does not help there — a seller did not
+> send the buyer's transaction. It was our buyer-side workaround that was
+> unnecessary.
 
 The cost side is not compelling either, so this is not a close call waiting on
 time:
