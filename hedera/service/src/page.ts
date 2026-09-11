@@ -10,7 +10,8 @@ export type LandingPageData = {
   network: string;
   payTo: string;
   facilitator: string;
-  port: number;
+  /** Public base URL of this service, with no trailing slash. */
+  baseUrl: string;
   topicId: string | null;
   hashscanTopicUrl: string | null;
 };
@@ -19,7 +20,7 @@ const esc = (v: unknown) =>
   String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
 export function renderLandingPage(d: LandingPageData): string {
-  const curl = `curl -s -X POST http://localhost:${d.port}/api/venus-health \\
+  const curl = `curl -s -X POST ${d.baseUrl}/api/venus-health \\
   -H 'content-type: application/json' \\
   -d '{"address":"0x1e0395b9de1e5e4b2c52ef17b7d0c56901212c7f","tier":"full"}' | jq`;
 

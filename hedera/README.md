@@ -67,10 +67,16 @@ Written automatically, never by hand:
 - `BUYER_ACCOUNT_ID` / `BUYER_PRIVATE_KEY` / `BUYER_KEY_TYPE` — appended by the first
   `npm run buy`, after it creates and funds the buyer account.
 
-Optional overrides: `BSC_RPC_URL` (Venus read), `MAX_SPEND_HBAR` (buyer's per-call budget,
-default `1`), `SERVICE_URL` (point the buyer at a remote service), and
-`AGENT_ERC8004_ID` / `AGENT_ERC8004_REGISTRY` / `AGENT_ERC8004_CHAIN_ID` /
-`AGENT_ERC8004_URI` / `AGENT_LISTING_URL` to point at a different registration.
+Optional overrides:
+
+| Variable | Used by | Effect |
+|---|---|---|
+| `SERVICE_URL` | buyer | Which service to buy from. Defaults to `http://localhost:$PORT`; set it to the deployed URL to pay the live service. |
+| `BSC_RPC_URL` | service | RPC for the Venus read. |
+| `MAX_SPEND_HBAR` | buyer | Per-call spend ceiling. Default `1`. |
+| `PORT` / `HOST` | service | Listen address. Defaults `4021` and `0.0.0.0`. |
+| `PUBLIC_URL` | service | Public base URL, so the landing page prints copy-pasteable examples when behind a proxy. |
+| `AGENT_ERC8004_ID`, `AGENT_ERC8004_REGISTRY`, `AGENT_ERC8004_CHAIN_ID`, `AGENT_ERC8004_URI`, `AGENT_LISTING_URL` | service | Point at a different ERC-8004 registration. |
 
 Install once:
 
@@ -211,6 +217,60 @@ curl -s -X POST http://localhost:4021/api/venus-health \
 
 `feePayer` is injected by the facilitator through `/supported` — the account that pays the
 Hedera network fee, and the account the buyer's transaction id is generated against.
+
+## Deploy
+
+The service runs as a container; the buyer CLI stays local, because it holds buyer keys
+and has no business in a public image.
+
+| File | |
+|---|---|
+| `Dockerfile` | Two stages on `node:20-slim`. Build compiles the `service` workspace with `tsc`; runtime installs production dependencies for that workspace only (`npm ci --omit=dev --workspace=service --include-workspace-root`) and runs `node service/dist/server.js` as the unprivileged `node` user. |
+| `.dockerignore` | Keeps `.env*`, `agent/`, `node_modules/` and build output out of the context. |
+| `fly.toml` | App `agensea-hedera-x402`, region `ams`, one `shared-cpu-1x` machine with 1 GB, `internal_port = 4021`, HTTPS forced, `auto_stop_machines = "off"` and `min_machines_running = 1` so the demo URL never cold-starts, plus a `/health` check. |
+
+`agent/package.json` is copied into the image even though the agent is excluded: npm needs
+every workspace manifest present to validate the lockfile. `.dockerignore` keeps its source
+out.
+
+### Region
+
+`ams`, not Fly's Johannesburg edge. The latency that decides how long a paid request takes
+is this service's round trip to the Blocky402 facilitator and the Hedera consensus nodes,
+not the distance to any one viewer, and eu-central is much better connected to both.
+
+### First deploy
+
+```bash
+cd hedera
+
+# 1. Create the app (once). Requires `fly auth login` first.
+fly launch --no-deploy --copy-config --name agensea-hedera-x402 --region ams --yes
+
+# 2. Push the server-side secrets. .env.fly is git-ignored; regenerate it from .env with:
+#      grep -E '^(HEDERA_NETWORK|SERVICE_ACCOUNT_ID|SERVICE_PRIVATE_KEY|SERVICE_KEY_TYPE|FACILITATOR_URL|PRICE_HBAR|HCS_TOPIC_ID|BSC_RPC_URL|AGENT_[A-Z0-9_]+)=' .env > .env.fly
+fly secrets import --app agensea-hedera-x402 < .env.fly
+
+# 3. Ship it.
+fly deploy --app agensea-hedera-x402 --config fly.toml
+```
+
+`.env.fly` deliberately excludes every `BUYER_*` variable and `PORT`: the buyer's key must
+never leave this machine, and the port comes from `fly.toml`.
+
+`HCS_TOPIC_ID` is among the secrets, so the deployed service reuses the existing audit topic
+rather than creating a second one. If it were ever missing, the service would create a topic
+and log the id to `fly logs` with a warning — a container has no `hedera/.env` to write it
+back to.
+
+### Buying from the deployed service
+
+```bash
+cd hedera
+SERVICE_URL=https://agensea-hedera-x402.fly.dev npm run buy -- 0x1e0395b9de1e5e4b2c52ef17b7d0c56901212c7f summary
+```
+
+Or set `SERVICE_URL` in `hedera/.env` to make it the default.
 
 ## Notes on the wiring
 

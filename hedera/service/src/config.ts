@@ -114,4 +114,14 @@ export const CONFIG = {
   /** Per-tier price in tinybars. */
   tinybarsForTier,
   port: parseInt(process.env.PORT ?? '4021', 10),
+  /**
+   * Interface to bind. Containers must listen on all interfaces for the platform's
+   * proxy to reach them, so this defaults to 0.0.0.0 rather than loopback.
+   */
+  host: process.env.HOST ?? '0.0.0.0',
+  /**
+   * Public base URL, when the service is deployed behind a proxy. Used for the
+   * examples on the landing page so they are copy-pasteable as shown.
+   */
+  publicUrl: process.env.PUBLIC_URL?.trim().replace(/\/$/, '') || null,
 } as const;

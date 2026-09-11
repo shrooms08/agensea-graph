@@ -1,0 +1,18 @@
+# Never ship secrets into an image layer.
+.env
+.env.*
+
+# The buyer CLI is a local operator tool, not part of the service.
+agent/
+
+node_modules/
+**/node_modules/
+**/dist/
+*.tsbuildinfo
+
+.git/
+.gitignore
+.dockerignore
+Dockerfile
+fly.toml
+README.md

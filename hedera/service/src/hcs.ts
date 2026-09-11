@@ -79,13 +79,29 @@ export function sha256Hex(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+/**
+ * Persists a newly created topic id so the next start reuses it.
+ *
+ * Best-effort by design: in a container there is no hedera/.env to append to and the
+ * filesystem may be read-only. Losing the write is not fatal — it only means the id
+ * has to come from the environment next time — so this warns loudly rather than
+ * taking the service down over it.
+ */
 function appendTopicToEnv(id: string): void {
-  const existing = readFileSync(ENV_PATH, 'utf8');
-  const prefix = existing.endsWith('\n') ? '' : '\n';
-  appendFileSync(
-    ENV_PATH,
-    `${prefix}\n# HCS audit topic, created automatically on first service start.\nHCS_TOPIC_ID=${id}\n`,
-  );
+  try {
+    const existing = readFileSync(ENV_PATH, 'utf8');
+    const prefix = existing.endsWith('\n') ? '' : '\n';
+    appendFileSync(
+      ENV_PATH,
+      `${prefix}\n# HCS audit topic, created automatically on first service start.\nHCS_TOPIC_ID=${id}\n`,
+    );
+  } catch (err) {
+    console.warn(
+      `[hcs] created topic ${id} but could not persist it to ${ENV_PATH}: ` +
+        `${err instanceof Error ? err.message : String(err)}\n` +
+        `[hcs] set HCS_TOPIC_ID=${id} in the environment so restarts reuse this topic.`,
+    );
+  }
 }
 
 /**

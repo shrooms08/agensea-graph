@@ -222,26 +222,39 @@ app.get('/audit', async (_req: Request, res: Response) => {
   }
 });
 
-app.get('/', (_req: Request, res: Response) => {
+/**
+ * The URL a client should use to reach this service. Behind a proxy the socket knows
+ * only the internal port, so prefer an explicit PUBLIC_URL, then the forwarded host,
+ * then the local address.
+ */
+function baseUrlFor(req: Request): string {
+  if (CONFIG.publicUrl) return CONFIG.publicUrl;
+  const host = req.get('x-forwarded-host') ?? req.get('host');
+  if (!host) return `http://localhost:${CONFIG.port}`;
+  const proto = req.get('x-forwarded-proto')?.split(',')[0] ?? req.protocol;
+  return `${proto}://${host}`;
+}
+
+app.get('/', (req: Request, res: Response) => {
+  const topicId = process.env.HCS_TOPIC_ID?.trim() ?? null;
   res.type('html').send(
     renderLandingPage({
       network: CONFIG.caip2,
       payTo: CONFIG.serviceAccountId,
       facilitator: CONFIG.facilitatorUrl,
-      port: CONFIG.port,
-      topicId: process.env.HCS_TOPIC_ID?.trim() ?? null,
-      hashscanTopicUrl: process.env.HCS_TOPIC_ID?.trim()
-        ? hashscanTopicUrl(process.env.HCS_TOPIC_ID.trim())
-        : null,
+      baseUrl: baseUrlFor(req),
+      topicId,
+      hashscanTopicUrl: topicId ? hashscanTopicUrl(topicId) : null,
     }),
   );
 });
 
 const topic = await ensureAuditTopic();
 
-app.listen(CONFIG.port, () => {
+app.listen(CONFIG.port, CONFIG.host, () => {
   console.log(`\n  AgenSea x402 on Hedera — Venus health service`);
-  console.log(`  http://localhost:${CONFIG.port}`);
+  console.log(`  listening on ${CONFIG.host}:${CONFIG.port}`);
+  console.log(`  ${CONFIG.publicUrl ?? `http://localhost:${CONFIG.port}`}`);
   console.log(`  network      ${CONFIG.caip2}`);
   console.log(`  tiers        summary ${TIER_PRICE_HBAR.summary} HBAR · full ${TIER_PRICE_HBAR.full} HBAR`);
   console.log(`  payTo        ${CONFIG.serviceAccountId}`);
