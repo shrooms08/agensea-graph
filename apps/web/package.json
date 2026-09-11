@@ -8,7 +8,7 @@
     "start": "next start -p 3111",
     "typecheck": "tsc --noEmit",
     "graph:smoke": "tsx --conditions=react-server scripts/graph-smoke.ts",
-    "test": "node tests/verify-canonical.test.mjs && node tests/hire-spec.test.mjs && node tests/deliverables-canon.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/scout-analysis.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/scout-stream-view.test.mjs",
+    "test": "node tests/verify-canonical.test.mjs && node tests/hire-spec.test.mjs && node tests/deliverables-canon.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/scout-analysis.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/scout-stream-view.test.mjs && node --conditions=react-server --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/llm-ratelimit.test.mjs",
     "dev:env": "./with-root-env.sh next dev -p 3111"
   },
   "dependencies": {
