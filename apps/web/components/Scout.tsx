@@ -221,7 +221,11 @@ export function Scout() {
         } else if (type === 'data-model') {
           model = (part.data as { id?: string })?.id ?? '';
         } else if (type === 'tool-emit_verdict' && part.state === 'output-available') {
-          verdicts.push(part.output as unknown as Verdict);
+          // recorded:false means the server's duplicate guard rejected it —
+          // a second verdict for an agent already judged in this answer. It
+          // stays in the transcript for the model but must not draw a card.
+          const out = part.output as { recorded?: boolean } | undefined;
+          if (out?.recorded) verdicts.push(out as unknown as Verdict);
         }
       }
     }

@@ -36,7 +36,7 @@ import {
   searchAgents,
   toCompositeId,
 } from '@/lib/graph/queries';
-import { activeModelId, getModel, isRateLimit } from '@/lib/llm';
+import { activeModelId, getModel, isRateLimit, modelProviderOptions } from '@/lib/llm';
 import { computeTrustSignals } from '@/lib/scout/analysis';
 
 export const runtime = 'nodejs';
@@ -155,6 +155,24 @@ const chainIdSchema = z
   .int()
   .describe(`Chain id. One of: ${CHAINS.map((c) => `${c.chainId} (${c.name})`).join(', ')}.`);
 
+/**
+ * NULL-TOLERANT OPTIONAL PARAMS.
+ *
+ * Every optional tool parameter below uses `.nullish()` and applies its
+ * default in the execute body, rather than `.optional()` or `.default()`.
+ *
+ * Models disagree about how to decline an optional argument. Gemini omits the
+ * key. Groq's gpt-oss sends it explicitly as `null` — which `.optional()`
+ * rejects, and the whole run dies on:
+ *
+ *   Tool call validation failed: parameters for tool get_chain_adoption did
+ *   not match schema: errors: [`/chainId`: expected integer, but got null]
+ *
+ * `.default()` has the same hole: a default only fills an ABSENT key, so an
+ * explicit null still fails validation. Accepting both spellings and
+ * defaulting in code is the only form that survives a provider swap.
+ */
+
 /* -------------------------------------------------------------------------- */
 /* System prompt                                                               */
 /* -------------------------------------------------------------------------- */
@@ -166,13 +184,14 @@ HOW YOU WORK
 - Cite your source inline for each claim, naming the tool, e.g. "234 reviews (get_trust_profile)".
 - If a tool fails or returns nothing, say so plainly. Do not substitute an estimate, and do not retry the same call more than once.
 - You must call emit_verdict EXACTLY ONCE for each agent you evaluate — no more, no less. Do not emit a verdict for an agent you did not look up.
+- emit_verdict is a TOOL CALL. NEVER write a verdict as JSON, a code block, or any other text in your reply — text is not a verdict, renders no card, and the user sees nothing. If you catch yourself typing "{" to describe an agent, stop and call the tool instead.
+- After your tool calls, finish with a SHORT plain-language answer, 2-4 sentences. The verdict cards carry the detail; do not repeat them in full.
 - Be efficient: you have a 60 second budget and 8 steps, and the model is rate limited, so every wasted call risks the whole answer. Do not look up more than 2 agents in one answer.
 
 USING search_agents WELL
 - It is a SUBSTRING match, not a semantic one. Search ONE short word: "yield", not "yield monitoring" — a multi-word phrase must appear verbatim and usually matches nothing.
 - Pass withFeedbackOnly: true whenever the question asks for agents with real usage or real feedback.
 - Get it right first time. If one short term returns nothing, try at most ONE alternative, then say nothing matched.
-- After your tool calls, finish with a SHORT plain-language answer (2-4 sentences). The verdict cards carry the detail; do not repeat them in full.
 
 DATA FACTS YOU MUST RESPECT
 1. Agent ids are composite strings "chainId:agentId", e.g. "56:30867". A bare "30867" is ambiguous; always pair it with a chainId. The tools accept either form.
@@ -196,6 +215,17 @@ Confidence reflects how much evidence you actually have, not how strong your opi
 
 /** Built per request so each tool can stream evidence through `writer`. */
 function makeTools(writer: Writer) {
+  /**
+   * One verdict per agent, enforced server-side.
+   *
+   * The system prompt says "exactly once per agent", but a prompt is a request,
+   * not a constraint — and a model that re-emits after re-reading a profile
+   * would put two contradictory cards on screen for the same agent. The second
+   * call is answered with recorded:false so the model learns it already did
+   * this, and the UI (which renders only recorded:true) never draws it.
+   */
+  const emitted = new Set<string>();
+
   return {
     search_agents: tool({
       description:
@@ -205,15 +235,21 @@ function makeTools(writer: Writer) {
       inputSchema: z.object({
         chainId: chainIdSchema,
         text: z.string().min(1).describe('Free text to match, e.g. "yield".'),
-        first: z.number().int().min(1).max(25).default(8),
+        // nullish(), not optional()/default(): see NULL-TOLERANT note above.
+        first: z.number().int().min(1).max(25).nullish(),
         withFeedbackOnly: z
           .boolean()
-          .default(false)
+          .nullish()
           .describe('True to return only agents that have at least one review.'),
       }),
       execute: async ({ chainId, text, first, withFeedbackOnly }, { toolCallId }) =>
         tracked(writer, 'search_agents', toolCallId, async () => {
-          const agents = await searchAgents({ chainId, text, first, withFeedbackOnly });
+          const agents = await searchAgents({
+            chainId,
+            text,
+            first: first ?? 8,
+            withFeedbackOnly: withFeedbackOnly ?? false,
+          });
           return { chainId, text, matchCount: agents.length, agents: agents.map(projectAgent) };
         }),
     }),
@@ -281,7 +317,9 @@ function makeTools(writer: Writer) {
         'agents with at least one review, total feedback, and whether a validation registry is ' +
         'deployed. Served from an hourly cache. Use this for "compare chains" questions.',
       inputSchema: z.object({
-        chainId: chainIdSchema.optional().describe('Omit to get every chain.'),
+        // nullish(): gpt-oss sends an explicit null here rather than omitting
+        // the key. See the NULL-TOLERANT note above.
+        chainId: chainIdSchema.nullish().describe('Omit to get every chain.'),
       }),
       execute: async ({ chainId }, { toolCallId }) =>
         // cached: true — on a cache hit this issues no subgraph query at all,
@@ -342,7 +380,32 @@ function makeTools(writer: Writer) {
       }),
       // Echoing the verdict back keeps it in the message parts for the UI to
       // render and gives the model a confirmation it can move on from.
-      execute: async (verdict) => ({ recorded: true, ...verdict }),
+      execute: async (verdict) => {
+        // Normalise through toCompositeId so "30867" and "56:30867" are one
+        // key, not two — otherwise the guard is trivially defeated by the
+        // model spelling the same agent both ways. Falls back to the raw
+        // string when the id is for another chain or is unparseable, which
+        // toCompositeId signals by throwing.
+        let key: string;
+        try {
+          key = toCompositeId(verdict.chainId, verdict.agentId).toLowerCase();
+        } catch {
+          key = verdict.agentId.trim().toLowerCase();
+        }
+        if (emitted.has(key)) {
+          return {
+            recorded: false as const,
+            duplicate: true as const,
+            agentId: verdict.agentId,
+            message:
+              `A verdict for ${verdict.agentId} was already recorded in this answer. ` +
+              `It has been kept and this one discarded. Do not call emit_verdict for ` +
+              `this agent again — move on to your final plain-language answer.`,
+          };
+        }
+        emitted.add(key);
+        return { recorded: true as const, ...verdict };
+      },
     }),
   };
 }
@@ -420,7 +483,34 @@ export async function POST(req: Request) {
    * which in production would simply have vanished. Aborting ourselves ends
    * the stream cleanly with whatever verdicts already landed.
    */
-  const DEADLINE_MS = 52_000;
+  const DEADLINE_MS = 56_000;
+  /**
+   * Soft budget: after this, no NEW tool calls are allowed and the model must
+   * write its answer with what it already has.
+   *
+   * The hard abort alone was not enough. Groq free-tier latency is wildly
+   * variable — the same question measured 4.6s and 38.7s on consecutive runs —
+   * and the 4-model-call shape ("search, profile, verdict, answer") hit the
+   * 52s abort on every attempt, killing the final plain-language answer after
+   * the verdict card had already rendered. A verdict with no answer is the
+   * worst possible output: it looks like the product is broken.
+   *
+   * TWO tiers, because one is a trap. A single gate that turns all tools off
+   * can fire before emit_verdict has been called, which loses the verdict as
+   * well as the answer — strictly worse than doing nothing.
+   *
+   *   past GATHER_BUDGET : only emit_verdict stays enabled. No new lookups,
+   *                        but the model can still record what it has judged.
+   *   past ANSWER_BUDGET : tools off entirely. Write the summary now.
+   *
+   * Tuned against measurements, not guessed. At 34s/52s the four-call shape
+   * lost its answer on every run: the closing call started at ~39s with 13s
+   * left and did not make it. These values leave the summary ~18s, which is
+   * above the median single Groq response measured here.
+   */
+  const GATHER_BUDGET_MS = 20_000;
+  const ANSWER_BUDGET_MS = 38_000;
+  const startedAt = Date.now();
   const deadline = AbortSignal.timeout(DEADLINE_MS);
 
   const stream = createUIMessageStream({
@@ -433,18 +523,32 @@ export async function POST(req: Request) {
 
       const tools = makeTools(writer);
 
+      const providerOptions = modelProviderOptions();
+
       const runStream = () =>
         streamText({
           model,
           system: SYSTEM,
           stopWhen: stepCountIs(8),
           tools,
+          ...(providerOptions ? { providerOptions } : {}),
           abortSignal: deadline,
-          // Gemini's free tier returns transient 503 "high demand" as well as
-          // 429. These are the SDK's own per-call retries with backoff; the
-          // 429 handling below is a separate, coarser retry of the whole run.
-          // Kept at 2, not 3: the backoff is exponential and the two retry
-          // mechanisms have to fit inside DEADLINE_MS together.
+          /**
+           * Wind the tool loop down on a clock so the run ends with prose
+           * rather than being guillotined mid-loop. See the budget constants.
+           */
+          prepareStep: ({ stepNumber }) => {
+            if (stepNumber === 0) return {};
+            const spent = Date.now() - startedAt;
+            if (spent > ANSWER_BUDGET_MS) return { toolChoice: 'none' as const };
+            if (spent > GATHER_BUDGET_MS) return { activeTools: ['emit_verdict' as const] };
+            return {};
+          },
+          // Free tiers return transient 503s as well as 429s — Gemini as
+          // "high demand", Groq under load. These are the SDK's own per-call
+          // retries with backoff; the 429 handling below is a separate,
+          // coarser retry of the whole run. Kept at 2, not 3: the backoff is
+          // exponential and both mechanisms must fit inside DEADLINE_MS.
           maxRetries: 2,
           prompt:
             `Default chain for this question: ${chainId} (${chain.name}). ` +
@@ -486,6 +590,28 @@ export async function POST(req: Request) {
           onError: describe,
         }),
       );
+
+      /**
+       * If the hard deadline fired, say so in the answer area.
+       *
+       * Otherwise a timed-out run renders as a verdict card with no prose
+       * under it, which reads as a broken product rather than a slow one. The
+       * verdict is still real and still evidence-backed — only the closing
+       * summary is missing, and that is worth stating plainly.
+       */
+      // PromiseLike, not a Promise — no .catch(), so wrap it.
+      await Promise.resolve(result.finishReason).catch(() => undefined);
+      if (deadline.aborted) {
+        writer.write({
+          type: 'text-delta',
+          id: 'deadline-note',
+          delta:
+            `\n\n_(Scout ran out of time at ${Math.round(DEADLINE_MS / 1000)}s and stopped ` +
+            `before writing its summary. Any verdict above is complete and backed by the ` +
+            `queries in Evidence — ${activeModelId()} on Groq's free tier is slow and highly ` +
+            `variable. Re-ask to get the summary.)_`,
+        });
+      }
     },
     onError: describe,
   });

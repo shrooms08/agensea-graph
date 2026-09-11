@@ -2,6 +2,7 @@ import 'server-only';
 
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createGroq } from '@ai-sdk/groq';
 import { createOpenAI } from '@ai-sdk/openai';
 import type { LanguageModel } from 'ai';
 
@@ -16,11 +17,40 @@ import type { LanguageModel } from 'ai';
  * than re-reason if any of these ever start 404ing.
  */
 
-export type LlmProvider = 'google' | 'anthropic' | 'openai';
+export type LlmProvider = 'groq' | 'google' | 'anthropic' | 'openai';
+
+/**
+ * Default provider: groq.
+ *
+ * Not a preference — a capacity decision. Gemini's free tier allows 20
+ * requests per DAY per model, and Scout spends one per reasoning step, so
+ * roughly four questions exhausted it. Groq's free tier allows 1,000 per day
+ * on the model below: 50x the headroom, which is the difference between a
+ * demo that works and one that does not.
+ */
+export const DEFAULT_PROVIDER: LlmProvider = 'groq';
 
 /**
  * Mid-tier, tool-calling, cheap enough to run a hackathon demo on.
  *
+ * groq:      openai/gpt-oss-120b. Groq's published free-tier table tops out
+ *            at 1,000 requests/day, shared by gpt-oss-120b, gpt-oss-20b and
+ *            the qwen3.x-27b pair; the 14.4K-RPD entries are
+ *            llama-prompt-guard classifiers, not chat models, so they cannot
+ *            run Scout. Of the three real candidates, verified against the
+ *            key in .env.local: both gpt-oss sizes tool-call correctly, and
+ *            qwen/qwen3.6-27b returns 429 "Request too large" even on a
+ *            two-number test call. 120b over 20b because the larger model
+ *            follows the emit_verdict protocol more reliably.
+ *
+ *            THE BINDING LIMIT IS TOKENS PER DAY, NOT REQUESTS. Measured the
+ *            hard way: 200,000 TPD, and a day of testing Scout exhausted it
+ *            at 198,955 used while 892 of the 1,000 requests were still
+ *            unspent. A Scout question costs roughly 5-10K tokens across its
+ *            tool loop, so the real budget is ~20-40 questions/day per model,
+ *            not 1,000. Only the 429 body reports TPD; the x-ratelimit-*
+ *            headers show the 8K-per-MINUTE token cap and hide it.
+ *            The per-model pools are separate — hence LLM_MODEL below.
  * google:    gemini-3.8-flash is the id the @ai-sdk/google docs use throughout
  *            their own setup snippets, it is listed with tool support, and it
  *            works on the free tier. Verified 11 Sep 2026.
@@ -28,31 +58,30 @@ export type LlmProvider = 'google' | 'anthropic' | 'openai';
  * openai:    gpt-5-mini is the mid tier between nano and full gpt-5.
  */
 export const MODEL_IDS: Record<LlmProvider, string> = {
+  groq: 'openai/gpt-oss-120b',
   google: 'gemini-3.8-flash',
   anthropic: 'claude-sonnet-5',
   openai: 'gpt-5-mini',
 };
 
 const ENV_KEY: Record<LlmProvider, string> = {
+  groq: 'GROQ_API_KEY',
   google: 'GOOGLE_GENERATIVE_AI_API_KEY',
   anthropic: 'ANTHROPIC_API_KEY',
   openai: 'OPENAI_API_KEY',
 };
 
-const PROVIDERS: readonly LlmProvider[] = ['google', 'anthropic', 'openai'];
+const PROVIDERS: readonly LlmProvider[] = ['groq', 'google', 'anthropic', 'openai'];
 
 /**
  * Optional per-deployment model override.
  *
- * This exists because Gemini's free tier meters
- * `GenerateRequestsPerDayPerProjectPerModel` at **20 requests per day, per
- * model**. Scout spends one request per reasoning step, so a handful of
- * questions exhausts a model for the rest of the day — and because the quota
- * is per MODEL, the fix is simply to name a different one. Without this
- * override that is a code change and a redeploy, which is absurd for a demo
- * that has just run out of quota mid-session.
+ * Applies to every provider, groq included. It exists because free-tier quota
+ * is metered PER MODEL, so the fix for an exhausted model is to name another
+ * one — and without this override that is a code change and a redeploy, which
+ * is absurd for a demo that has just run out of quota mid-session.
  *
- * Unset, the documented default below is used.
+ * Unset, the per-provider default below is used.
  */
 function overrideModelId(): string | null {
   return process.env.LLM_MODEL?.trim() || null;
@@ -69,7 +98,7 @@ function isProvider(v: string): v is LlmProvider {
  */
 export function activeProvider(): LlmProvider {
   const raw = process.env.LLM_PROVIDER?.trim().toLowerCase();
-  if (!raw) return 'google';
+  if (!raw) return DEFAULT_PROVIDER;
   if (!isProvider(raw)) {
     throw new Error(
       `LLM_PROVIDER="${raw}" is not supported. Use one of: ${PROVIDERS.join(', ')}.`,
@@ -102,6 +131,8 @@ export function getModel(): LanguageModel {
   const modelId = activeModelId();
 
   switch (provider) {
+    case 'groq':
+      return createGroq({ apiKey })(modelId);
     case 'google':
       return createGoogleGenerativeAI({ apiKey })(modelId);
     case 'anthropic':
@@ -119,14 +150,40 @@ export function activeModelId(): string {
 /**
  * True for a provider rate-limit response.
  *
- * Gemini's free tier has a low per-minute quota and Scout's multi-step tool
- * loop can burn through it inside one question. The AI SDK surfaces the HTTP
- * status on APICallError; the string check is the fallback for providers that
- * bury it in the message instead.
+ * Every free tier here meters something Scout's multi-step tool loop can
+ * exhaust inside a question — Gemini 20 requests/day/model, Groq 1,000/day
+ * plus a token-per-minute cap. The AI SDK surfaces the HTTP status on
+ * APICallError; the string check is the fallback for providers that bury it
+ * in the message instead.
  */
 export function isRateLimit(err: unknown): boolean {
   const e = err as { statusCode?: number; status?: number; message?: string } | null;
   if (!e) return false;
   if (e.statusCode === 429 || e.status === 429) return true;
   return typeof e.message === 'string' && /\b429\b|rate.?limit|quota/i.test(e.message);
+}
+
+/**
+ * Provider-specific call options, keyed for `streamText({ providerOptions })`.
+ *
+ * Lives here rather than in the route so the route stays provider-agnostic:
+ * switching LLM_PROVIDER must not require editing app/api/scout.
+ *
+ * groq — gpt-oss is a reasoning model, and left to its own default it spent
+ * long enough thinking between tool calls that a 4-step question ran out the
+ * 52s budget and lost its final answer. `reasoningEffort: 'low'` is the
+ * cheapest tier Groq accepts. Note the AI SDK's enum also offers 'none' and
+ * 'default'; Groq rejects both with
+ * "`reasoning_effort` must be one of `low`, `medium`, or `high`", so do not
+ * "fix" this to 'none'.
+ */
+export function modelProviderOptions():
+  | Record<string, Record<string, string | number | boolean>>
+  | undefined {
+  switch (activeProvider()) {
+    case 'groq':
+      return { groq: { reasoningEffort: 'low' } };
+    default:
+      return undefined;
+  }
 }
