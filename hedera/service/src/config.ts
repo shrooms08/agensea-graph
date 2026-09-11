@@ -10,6 +10,7 @@
 import { config as loadDotenv } from 'dotenv';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TIER_PRICE_HBAR } from './tiers.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** hedera/.env — shared by the service and the agent. */
@@ -93,6 +94,11 @@ const serviceKeys = resolveKeyPair(
   'SERVICE',
 );
 
+const tinybarsForTier = {
+  summary: hbarToTinybars(TIER_PRICE_HBAR.summary),
+  full: hbarToTinybars(TIER_PRICE_HBAR.full),
+} as const;
+
 export const CONFIG = {
   /** "testnet" | "mainnet" */
   network,
@@ -102,7 +108,10 @@ export const CONFIG = {
   servicePrivateKey: serviceKeys.privateKey,
   serviceKeyType: serviceKeys.keyType,
   facilitatorUrl: (process.env.FACILITATOR_URL ?? 'https://api.testnet.blocky402.com').replace(/\/$/, ''),
+  /** Legacy flat price, kept for the flat-pricing fallback and for display. */
   priceHbar,
   priceTinybars: hbarToTinybars(priceHbar),
+  /** Per-tier price in tinybars. */
+  tinybarsForTier,
   port: parseInt(process.env.PORT ?? '4021', 10),
 } as const;

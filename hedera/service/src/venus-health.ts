@@ -94,3 +94,20 @@ export async function getVenusHealth(address: string): Promise<VenusHealthRespon
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** The `summary` tier: the verdict without the per-market breakdown behind it. */
+export type VenusHealthSummary = Pick<
+  VenusHealthResponse,
+  'address' | 'source' | 'healthFactor' | 'riskLevel' | 'recommendation' | 'checkedAt'
+>;
+
+export function summarise(full: VenusHealthResponse): VenusHealthSummary {
+  return {
+    address: full.address,
+    source: full.source,
+    healthFactor: full.healthFactor,
+    riskLevel: full.riskLevel,
+    recommendation: full.recommendation,
+    checkedAt: full.checkedAt,
+  };
+}
