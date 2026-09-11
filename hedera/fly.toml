@@ -1,45 +1,34 @@
-# Fly.io deployment for the x402-gated Venus health service.
+# fly.toml app configuration file generated for agensea-hedera-x402 on 2026-09-11T09:04:16+01:00
 #
-# Secrets (SERVICE_PRIVATE_KEY and friends) are NOT here — they are set out of band
-# with `fly secrets import < .env.fly`. Only non-sensitive runtime config lives in
-# this file, which is committed.
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "agensea-hedera-x402"
-
-# Amsterdam. Fly's nearest region to Lagos is jnb, but the latency that decides how
-# long a paid request takes is this service's round trip to the Blocky402 facilitator
-# and the Hedera consensus nodes, not the distance to any one viewer — and eu-central
-# is far better connected to both than Fly's Johannesburg edge.
-primary_region = "ams"
+app = 'agensea-hedera-x402'
+primary_region = 'ams'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
-  PORT = "4021"
-  HOST = "0.0.0.0"
-  # Makes the landing page print copy-pasteable examples against the public URL.
-  PUBLIC_URL = "https://agensea-hedera-x402.fly.dev"
+  HOST = '0.0.0.0'
+  PORT = '4021'
+  PUBLIC_URL = 'https://agensea-hedera-x402.fly.dev'
 
 [http_service]
   internal_port = 4021
   force_https = true
-  # This is a demo URL that must answer instantly when someone opens it, so the
-  # machine is pinned up rather than scaled to zero between requests.
-  auto_stop_machines = "off"
+  auto_stop_machines = 'off'
   auto_start_machines = true
   min_machines_running = 1
-  processes = ["app"]
+  processes = ['app']
 
   [[http_service.checks]]
-    grace_period = "15s"
-    interval = "30s"
-    method = "GET"
-    path = "/health"
-    timeout = "5s"
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '15s'
+    method = 'GET'
+    path = '/health'
 
 [[vm]]
-  size = "shared-cpu-1x"
-  # 512mb is tight for the Hedera SDK's protobuf runtime alongside Express; 1gb
-  # leaves headroom without moving off the shared tier.
-  memory = "1gb"
+  size = 'shared-cpu-1x'
+  memory = '1gb'
