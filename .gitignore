@@ -22,3 +22,6 @@ next-env.d.ts
 .claude/
 
 *.tsbuildinfo
+
+# Hedera x402 service/agent local secrets
+hedera/.env

@@ -1,0 +1,23 @@
+# Never ship secrets into an image layer.
+.env
+.env.*
+
+# The buyer CLI is a local operator tool, not part of the service. Its manifest is
+# the one exception: npm needs every workspace manifest present to validate the
+# lockfile, so the Dockerfile copies agent/package.json and nothing else from here.
+# This must stay `agent/*` rather than `agent/`: Docker cannot re-include a child of
+# a directory that was excluded outright.
+agent/*
+!agent/package.json
+
+node_modules/
+**/node_modules/
+**/dist/
+*.tsbuildinfo
+
+.git/
+.gitignore
+.dockerignore
+Dockerfile
+fly.toml
+README.md
