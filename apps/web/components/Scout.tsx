@@ -9,9 +9,10 @@
  */
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
+import { useSearchParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
 
-import { CHAINS, DEFAULT_CHAIN_ID } from '@/lib/graph/chains';
+import { CHAINS, DEFAULT_CHAIN_ID, getChainById } from '@/lib/graph/chains';
 
 const EXAMPLES = [
   'Is 56:30867 safe to hire?',
@@ -190,8 +191,29 @@ function EvidencePanel({ parts }: { parts: EvidencePart[] }) {
   );
 }
 
+/**
+ * Initial chain from `?chain=<chainId>`, which is how /adoption's per-chain
+ * "Scout this chain" links arrive.
+ *
+ * Read CLIENT-side on purpose. Taking it from the page's `searchParams` would
+ * turn /scout into a dynamic route — it is currently static with an hourly
+ * revalidate, and a deep link is not worth giving that up. useSearchParams
+ * needs a Suspense boundary on a static page; page.tsx provides one.
+ *
+ * An unknown or malformed chain falls back to the default rather than leaving
+ * the selector on a chain that is not in the list.
+ */
+function useInitialChainId(): number {
+  const params = useSearchParams();
+  const raw = params?.get('chain');
+  if (!raw) return DEFAULT_CHAIN_ID;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || !getChainById(parsed)) return DEFAULT_CHAIN_ID;
+  return parsed;
+}
+
 export function Scout() {
-  const [chainId, setChainId] = useState<number>(DEFAULT_CHAIN_ID);
+  const [chainId, setChainId] = useState<number>(useInitialChainId());
   const [input, setInput] = useState('');
 
   const { messages, sendMessage, status, error } = useChat({

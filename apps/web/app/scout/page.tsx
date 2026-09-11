@@ -8,6 +8,7 @@
  * Scout tool share, so the three can never disagree.
  */
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 
 import { Scout } from '@/components/Scout';
 import { cachedAdoptionSnapshot } from '@/lib/graph/adoption-cache';
@@ -46,7 +47,16 @@ export default async function ScoutPage() {
           &ldquo;insufficient data&rdquo; rather than guessing.
         </p>
 
-        <Scout />
+        {/*
+          Suspense is REQUIRED, not decorative: <Scout /> calls
+          useSearchParams() to pick up ?chain=, and Next refuses to
+          statically render a page that reads search params outside a
+          boundary. Without it `next build` fails this route rather than
+          silently degrading it.
+        */}
+        <Suspense fallback={<div className="scout-ask" style={{ minHeight: 220 }} />}>
+          <Scout />
+        </Suspense>
       </section>
 
       <section className="sec sec-rule">
