@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start -p 3111",
     "typecheck": "tsc --noEmit",
+    "graph:smoke": "tsx --conditions=react-server scripts/graph-smoke.ts",
     "test": "node tests/verify-canonical.test.mjs && node tests/hire-spec.test.mjs && node tests/deliverables-canon.test.mjs"
   },
   "dependencies": {
@@ -16,6 +17,7 @@
     "next": "^16.3.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "server-only": "0.0.1",
     "three": "^0.185.1",
     "viem": "^2.56.0",
     "wagmi": "^3.7.7"
@@ -25,6 +27,7 @@
     "@types/react": "^19.2.18",
     "@types/three": "^0.185.4",
     "playwright": "^1.62.1",
+    "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   }
 }
