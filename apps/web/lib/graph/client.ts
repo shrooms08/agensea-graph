@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { countRows, record } from './evidence';
+
 /**
  * The only place THEGRAPH_API_KEY is read, and the only place that talks to the
  * gateway.
@@ -94,6 +96,41 @@ export async function graphQuery<T>(
   subgraphId: string,
   query: string,
   variables: Record<string, unknown> = {},
+): Promise<T> {
+  // Record every call for Scout's evidence panel. This is the only layer that
+  // knows the query text, and wrapping here catches pagination loops the tool
+  // layer never sees. No-op outside a withEvidence scope.
+  const started = Date.now();
+  try {
+    const data = await runQuery<T>(subgraphId, query, variables);
+    record({
+      subgraphId,
+      query,
+      variables,
+      rowCount: countRows(data),
+      ms: Date.now() - started,
+      ok: true,
+    });
+    return data;
+  } catch (err) {
+    record({
+      subgraphId,
+      query,
+      variables,
+      rowCount: 0,
+      ms: Date.now() - started,
+      ok: false,
+      // GraphError messages are already key-redacted.
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
+}
+
+async function runQuery<T>(
+  subgraphId: string,
+  query: string,
+  variables: Record<string, unknown>,
 ): Promise<T> {
   const key = apiKey();
   const url = `${GATEWAY}/${key}/subgraphs/id/${subgraphId}`;

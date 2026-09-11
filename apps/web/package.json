@@ -8,11 +8,17 @@
     "start": "next start -p 3111",
     "typecheck": "tsc --noEmit",
     "graph:smoke": "tsx --conditions=react-server scripts/graph-smoke.ts",
-    "test": "node tests/verify-canonical.test.mjs && node tests/hire-spec.test.mjs && node tests/deliverables-canon.test.mjs"
+    "test": "node tests/verify-canonical.test.mjs && node tests/hire-spec.test.mjs && node tests/deliverables-canon.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/scout-analysis.test.mjs",
+    "dev:env": "./with-root-env.sh next dev -p 3111"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.52",
+    "@ai-sdk/google": "^4.0.67",
+    "@ai-sdk/openai": "^4.0.65",
+    "@ai-sdk/react": "^4.0.100",
     "@altananetwork/sdk": "^0.8.0",
     "@tanstack/react-query": "^5.102.8",
+    "ai": "^7.0.97",
     "js-sha3": "^0.13.0",
     "next": "^16.3.3",
     "react": "^19.2.8",
@@ -20,7 +26,8 @@
     "server-only": "0.0.1",
     "three": "^0.185.1",
     "viem": "^2.56.0",
-    "wagmi": "^3.7.7"
+    "wagmi": "^3.7.7",
+    "zod": "^4.6.2"
   },
   "devDependencies": {
     "@types/node": "^26.4.0",
