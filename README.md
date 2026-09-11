@@ -1,783 +1,245 @@
-# AgenSea
+# AgenSea Trust Layer
 
-## What this is
+**ETHOnline 2026 · Continuity pool ("Extend Open Source")**
 
-BSC has **322,974** registered AI agents. **4,353** have ever had a client.
-(Both figures from `registry_stats`, measured 31 Aug 2026.)
+ERC-8004 registries now hold hundreds of thousands of agents, and almost none of them have
+ever been used. AgenSea's Trust Layer answers the question that follows — *can I trust this
+one?* — by reasoning over live data from The Graph's Agent0 subgraphs across five chains.
+**Scout** is a natural-language trust analyst that computes reviewer concentration, burst
+patterns and per-tag score ranges from real subgraph queries, then shows you every query it
+ran. **Adoption** charts how little of each registry is actually in use. Every figure on
+both pages traces to a GraphQL query you can read.
 
-AgenSea is a marketplace and registry explorer for BNB Chain that measures
-which agents are real, and lets you hire the ones that are — and revoke their
-permissions — in-product.
+**Live: https://agensea-graph.vercel.app** · [**/scout**](https://agensea-graph.vercel.app/scout) · [**/adoption**](https://agensea-graph.vercel.app/adoption)
 
-Live: https://agensea-navy.vercel.app  
-Agent Advantage Report: [AGENT_ADVANTAGE_REPORT.md](AGENT_ADVANTAGE_REPORT.md)  
-Try it: [/category/health-factor-monitoring](https://agensea-navy.vercel.app/category/health-factor-monitoring) — Hire runs a real on-chain job, free, in ~10s  
-How it works: [/docs](https://agensea-navy.vercel.app/docs) — how we measure, how hiring works, how to verify a deliverable, session keys, and what we have not built
+---
 
-![AgenSea landing — the fan-out curve and the four category cards](docs/landing-1440.png)
+## What was built during ETHOnline
 
-## What we measured
+Everything below is `pre-hackathon-baseline..main`
+([compare](https://github.com/shrooms08/agensea-graph/compare/pre-hackathon-baseline...main)) —
+33 commits, 60 files, +13,756 lines.
 
-Every figure below carries the `measured_at` of the sweep it came from — the
-same date the site prints next to each number. Percentages marked *derived*
-are computed from those measured values.
+- **Graph data layer** — [`apps/web/lib/graph/`](apps/web/lib/graph/): a server-only gateway
+  client with timeouts and key redaction (`client.ts`), a five-chain registry (`chains.ts`),
+  typed entities transcribed from live introspection (`types.ts`), the queries
+  (`queries.ts`), an `AsyncLocalStorage` evidence recorder (`evidence.ts`) and the shared
+  hourly cache (`adoption-cache.ts`). Schema notes in
+  [`docs/hackathon/agent0-schema-notes.md`](docs/hackathon/agent0-schema-notes.md).
+  ([`129daea..c7b67de`](https://github.com/shrooms08/agensea-graph/compare/129daea...c7b67de))
+- **Scout, the trust analyst** — [`/scout`](https://agensea-graph.vercel.app/scout),
+  [`apps/web/app/api/scout/route.ts`](apps/web/app/api/scout/route.ts),
+  [`apps/web/lib/scout/`](apps/web/lib/scout/). A four-tool AI SDK loop over the subgraphs;
+  `analysis.ts` computes the trust signals in pure, unit-tested arithmetic the model cannot
+  fudge. ([`96cf1a5..f47762a`](https://github.com/shrooms08/agensea-graph/compare/96cf1a5...f47762a))
+- **Cross-chain adoption** — [`/adoption`](https://agensea-graph.vercel.app/adoption),
+  [`apps/web/app/adoption/page.tsx`](apps/web/app/adoption/page.tsx),
+  [`/api/graph/adoption`](https://agensea-graph.vercel.app/api/graph/adoption). One query
+  pattern across five deployments, rendered with plain divs — no chart library.
+  ([`f613fb6..b1aa803`](https://github.com/shrooms08/agensea-graph/compare/f613fb6...b1aa803))
+- **Provider failover** — [`apps/web/lib/llm.ts`](apps/web/lib/llm.ts). A 429 that means
+  "daily quota gone" is routed to a second vendor; a per-minute 429 gets a short backoff on
+  the same one. ([`7744646`](https://github.com/shrooms08/agensea-graph/commit/7744646))
+- **Hardening** — single-submission Scout, one card per agent, and a footer job lookup that
+  cannot drift. ([`c25f900..f3cfaef`](https://github.com/shrooms08/agensea-graph/compare/c25f900...f3cfaef))
+- **Hedera: agents hiring agents** — [`hedera/`](hedera/). An x402-gated service that makes
+  the Venus Health Factor Monitor hireable by another agent with no human in the loop, paid
+  per call in HBAR on Hedera testnet, with every sale written to a Hedera Consensus Service
+  topic. Full detail and verification links in [`hedera/README.md`](hedera/README.md).
+  ([`fbab343..58511a3`](https://github.com/shrooms08/agensea-graph/compare/fbab343...58511a3))
 
-- **322,974** ERC-8004 agents minted on BSC mainnet (chain 56) — measured 31 Aug 2026
-- **The registry grows ~3,095 agents/day** (*derived*: +5,506 minted between the
-  29 Aug 20:53 UTC and 31 Aug 15:36 UTC sweeps) — while the number that have
-  ever had a client did not move
-- **4,353** have ever had a client — 1.35% of minted and falling (*derived*) —
-  measured 31 Aug 2026
-- **The fan-out collapse:** those 4,353 agents' **8,265** client relationships come
-  from only **108** distinct client addresses, and the top two addresses alone
-  account for **35.5%** of all edges (1,800 + 1,137 = 2,937; *derived*).
-  Reputation on the registry traces to a small set of payers.
-- **B402 Bazaar:** **978** resources from **7** payees, one payee holding
-  **96.22%** of the catalogue — measured 31 Aug 2026
-- **Exactly one** agent address appears in both datasets — measured 31 Aug 2026
-- **The Studio path reaches our index:** an agent scaffolded with BNB Agent
-  Studio, deployed to AWS AgentCore and registered with `bag erc8004 register`,
-  is in the registry we sweep — agent **341493** on chain 56, owner
-  `0xCBEF…e002`, indexed 18:43 UTC on 8 Sep 2026. It is a **scaffold running the
-  default free model**: it does no useful work, and it exists only to test the
-  registry path end to end. It is not hireable through AgenSea — our hire path
-  is on 97.
+## What existed before
 
-### Cross-checked against 8004scan (surveyed 1 Sep 2026)
+Tagged [`pre-hackathon-baseline`](https://github.com/shrooms08/agensea-graph/releases/tag/pre-hackathon-baseline)
+(`e0d1392`). **Only work after that tag is submitted for judging.** The pre-existing README
+is preserved verbatim at [`docs/PRE-HACKATHON-README.md`](docs/PRE-HACKATHON-README.md).
 
-We compared our sweep with [8004scan](https://8004scan.io), a third-party
-ERC-8004 explorer, on chain 56:
+- A marketplace and registry explorer for ERC-8004 on BNB Smart Chain.
+- Its own full-registry sweep over Multicall3 — the source of the independent 1.35% figure
+  this project cross-checks against The Graph.
+- A Supabase data layer holding sweep results, with RLS and an anon read path.
+- Four first-party agents (health factor, rebalancing, grid trading, yield optimisation).
+- ERC-8183 session-key hiring: hire an agent, get a hash-verifiable deliverable, revoke.
 
-- **They index 295,734 BSC agents against our 322,974** measured from chain —
-  8.4% behind.
-- **Their API never returns “no data.”** An agent it cannot resolve comes back
-  as a synthesized `"Agent #<id>"` with an empty description and
-  `metadata_completeness_score: 0.0` — indistinguishable from real metadata
-  unless you check for it. We asked them for **all 908** of our agents that
-  have a client but no metadata of their own:
+The Trust Layer adds no dependency on any of it: `lib/graph`, `lib/scout`, `/scout` and
+`/adoption` read The Graph only.
 
-  | | agents | share |
-  |---|---:|---:|
-  | real metadata, stored | 136 | 15.0% |
-  | **synthesized `Agent #<id>` placeholder, rejected** | **730** | **80.4%** |
-  | blank name, rejected | 31 | 3.4% |
-  | name only, nothing behind it, rejected | 11 | 1.2% |
+## How The Graph is used
 
-  A 40-agent pre-sample had predicted 52% placeholders. It was drawn from our
-  highest fan-out agents, which are far better documented than the tail, so it
-  overestimated their coverage by 28 points — the measured figure above is the
-  one to trust. The rejection is enforced by a `CHECK` constraint on our table,
-  not only by ingest code, so their filler cannot be stored even by accident.
-- **8 of 11,780** BSC feedback events carry a numeric score, so their
-  `average_score` is not a meaningful figure on this chain.
+All five are deployments of one shared Agent0 schema on The Graph Network, queried through
+the decentralised gateway. IDs live in [`apps/web/lib/graph/chains.ts`](apps/web/lib/graph/chains.ts).
 
-The units are not the same and we do not treat them as such: our client count
-is `getClients()` read live from the ReputationRegistry; theirs is an indexed
-feedback event. These are two different quantities, not one quantity measured
-twice — which is also why our 4,353 agents-with-a-client and their 582
-agents-with-feedback are not a contradiction.
-
-The full write-ups: [AGENT_ADVANTAGE_REPORT.md](AGENT_ADVANTAGE_REPORT.md)
-(three frozen tasks, hired agent vs. assisted DIY, with timings and quality
-comparison) and [PHASE0_FINDINGS.md](PHASE0_FINDINGS.md) (chain diagnostics).
-
-## What we built
-
-Four first-party agents on BSC testnet (chain 97), one per BNB category, each
-with completed ERC-8183 jobs whose deliverable hashes are verifiable on chain:
-
-| Agent | Agent id | Category | A completed job |
-|---|---|---|---|
-| Venus Health Factor Monitor | 2012 | health-factor-monitoring | 795 |
-| PancakeSwap V3 Rebalancing Monitor | 2013 | rebalancing | 796 |
-| Grid Trading Parameter Advisor | 2014 | grid-trading | 754 |
-| BSC Yield Route Optimiser | 2015 | yield-optimisation | 797 |
-
-Verify one yourself: `bash scripts/verify_deliverable.sh 754 --legacy`
-re-derives job 754's on-chain hash from the canonical manifest against a public
-RPC and prints `RESULT: MATCH` (`--legacy` because 754 predates the non-ASCII
-canonicalisation fix). The manifest shape, the exact hashing rule and the
-in-browser path are in [/docs](https://agensea-navy.vercel.app/docs#how-to-verify).
-
-- **Hire flow** — wallet-native on `/marketplace/[id]`: you escrow 1 $U from
-  your own wallet, the agent delivers a hash-committed result, and our keeper
-  settles after the 900-second dispute window. Testnet funding is one click; a
-  sponsored fallback covers wallets with no funds.
-  ([the five transactions, step by step](https://agensea-navy.vercel.app/docs#how-hiring-works))
-- **Revoke control** — revoke an agent's session on chain from its own page and
-  watch the authority read go dead; it self-heals on the next hire.
-  ([what a session key can and cannot do](https://agensea-navy.vercel.app/docs#session-keys))
-- **Per track**: main — the live marketplace (categories, hire, revoke);
-  Altana — session keys granted, scoped, revoked and healed on chain
-  (`/marketplace/2012`, session panel); TermiX —
-  [AGENT_ADVANTAGE_REPORT.md](AGENT_ADVANTAGE_REPORT.md) with evidence in
-  `apps/agents/evidence/`; PancakeSwap — agents 2013 (V3 position analysis)
-  and 2014 (grid parameters from the pool's own TWAP oracle).
-- **Mainnet identity** — the Venus Health Factor Monitor is also registered in
-  the BSC MAINNET (56) ERC-8004 IdentityRegistry: agentId **322885**,
-  [tx 0x381cff97…](https://bscscan.com/tx/0x381cff9788d7c6866f56609035a49fa9dca78ed01540884b0557beec4b377807),
-  byte-identical metadata. Jobs, sessions and escrow are demonstrated on
-  testnet 97 — no mainnet jobs exist.
-
-## Upstream issues filed
-
-Authored by `shrooms08` (GitHub shows the authorship). **Five findings filed,
-three fixed** — #57, #58 and #59 all shipped in `@altananetwork/sdk` **0.9.0**,
-published 2 Sep 2026. The two open ones are against `bnb-chain/bnbagent-sdk`.
-
-**Two of the three merges cite our own on-chain transactions as their
-verification.** [#66](https://github.com/altananetwork/altana-sdk/pull/66)
-confirmed our raised-cap retry at **block 127877832** before writing code, and
-replayed our bundle to show it still returned `{status: 300, receipts: []}` days
-later — permanently terminal, not pending.
-[#68](https://github.com/altananetwork/altana-sdk/pull/68) cites our `submit`
-through generic `execute` at **block 127889442** as its evidence that the
-`submit(uint256,bytes32,bytes)` selector works in the deployed kernel.
-
-Both blocks are on chain 97, and both were re-read here against the seed node
-rather than taken from the PRs: 127877832 is timestamped 29 Aug 08:17:55 UTC and
-we filed #57 at 08:21:37 — under four minutes later. 127889442 is 09:44:59 and
-#59 was filed at 09:46:39, a hundred seconds after. Each transaction is the one
-that produced the report it is cited in.
-
-[#67](https://github.com/altananetwork/altana-sdk/pull/67) took the third route:
-it ran our repro and found a failure mode **we had not reported** —
-`JSON.stringify` *throws* on any session carrying a spend cap, because the
-limits are bigints. So the documented "persist the Session verbatim" advice
-failed three ways, not the two we described.
-
-- [altana-sdk #57](https://github.com/altananetwork/altana-sdk/issues/57) —
-  `waitForCalls` hangs for the full 240 s timeout on unmapped relay status 300.
-  **Fixed upstream in [#66](https://github.com/altananetwork/altana-sdk/pull/66)**,
-  merged 2 Sep 2026: relay statuses are classified by EIP-5792 band, so a
-  rejection fails in ~355 ms with `statusCode` attached instead of returning a
-  wrong `PENDING` after four minutes. The PR replayed our bundle (still
-  `{status: 300, receipts: []}` days later) and confirmed our raised-cap retry
-  on chain at block 127877832.
-- [altana-sdk #58](https://github.com/altananetwork/altana-sdk/issues/58) —
-  docs say to persist the `Session` object verbatim, but `JSON.stringify` drops
-  `signDigest` and keeps `_privateKey`.
-  **Fixed upstream in [#67](https://github.com/altananetwork/altana-sdk/pull/67)**,
-  merged 2 Sep 2026: `serializeSession` / `deserializeSession` helpers,
-  `_privateKey` made non-enumerable so no spread or stringify can capture it,
-  and the advice rewritten in all eight places. Running our repro also turned up
-  a third failure we had not reported — `JSON.stringify` *throws* on any session
-  carrying a spend cap, because the limits are bigints.
-- [altana-sdk #59](https://github.com/altananetwork/altana-sdk/issues/59) —
-  no ERC-8183 seller path: the SDK could hire and settle but not submit a
-  deliverable. **Filed; fixed upstream in
-  [altana-sdk #68](https://github.com/altananetwork/altana-sdk/pull/68)**,
-  merged 1 Sep 2026, which adds `submitErc8183Deliverable`, `buildSubmitCall`,
-  `erc8183SubmitPermissions` and a manifest codec. Our manifest and submit path
-  in `apps/agents/src/erc8183` exists because the SDK had none when we built
-  it; that gap is now closed upstream. The PR cites our own submit transaction
-  through generic `execute` (chain 97, block 127889442) as its on-chain
-  confirmation that the `submit(uint256,bytes32,bytes)` selector works, and
-  credits the cross-language hash trap we reported — which it found in its own
-  demo script: a hand-rolled canonicaliser missing the `\uXXXX` escaping,
-  hashing a report containing an em dash. It shipped in 0.9.0 on 2 Sep; we are
-  on `^0.8.0` and have not migrated, six days from submission. Independent
-  corroboration that the gap was real and general, not our misreading: BNB Agent
-  Studio's own seller hand-rolls its deliverable submit in
-  `app/agent/src/signing.ts` rather than calling the SDK, and pins
-  `@altananetwork/sdk@0.7.1`.
-- [bnb-chain/bnbagent-sdk #82](https://github.com/bnb-chain/bnbagent-sdk/issues/82) —
-  jobId race: provider + status cannot identify your own job, so a losing racer
-  can submit a valid-hash deliverable for the wrong task (the hire route guards
-  against this by re-reading the job's description after funding)
-- [bnb-chain/bnbagent-sdk #86](https://github.com/bnb-chain/bnbagent-sdk/issues/86) —
-  the BNB Agent Studio buyer skill (`buying-via-8183.md`) documents a 24 h
-  ERC-8183 dispute window in six places, one of them labelled a *protocol fact*.
-  `disputeWindow()` on the policies that `config.py` itself ships returns **900 s
-  on chain 97** and **604,800 s on chain 56** — neither is 24 h, and the error
-  runs in opposite directions, so no single constant fixes it. A buyer following
-  the doc idles a day on a testnet job that was settleable in fifteen minutes,
-  and on mainnet approves six days early into a revert. Same class as
-  [altana-sdk #53](https://github.com/altananetwork/altana-sdk/issues/53): a
-  shipped constant the deployed contract contradicts. Both windows re-read here
-  before filing; the 900 s figure is the one `/docs` renders.
-
-Confirmed on chain, not authored by us:
-
-- [altana-sdk #53](https://github.com/altananetwork/altana-sdk/issues/53)
-  (filed by an altana-sdk maintainer) — `ERC8183_ADDRESSES[97].policy` is not
-  whitelisted on the EvaluatorRouter. We verified the failure independently via
-  `router.policyWhitelist()` reads; see footgun 4 below. Closed 1 Sep 2026, and
-  0.9.0 ships the whitelisted address — verified by unpacking the published
-  tarball: `0xd6a42175…` is present and the broken `0x4F4678D4…` is gone.
-
-## Repository layout
-
-| Path | Purpose |
-|---|---|
-| `apps/web` | The Next.js site on Vercel — marketplace, registry explorer, hire and revoke UI. This is what is live at agensea-navy.vercel.app. |
-| `apps/indexer` | Phase 0 chain diagnostics, B402 Bazaar ingest, ERC-8004 agent sweeps, SQL migrations |
-| `apps/agents` | Altana session-key agents (Phase 2 onward), ERC-8183 hire/submit/settle scripts, evidence |
-| `design/` | Design system reference and the canonical mark |
-
-## Engineering notebook
-
-The rest of this file is the engineering notebook: SDK footguns, relay-fee
-measurements, Venus decoding, and the sweep runbook — where the submission
-ends and the working notes begin.
-
-## Environment
-
-Copy `.env.example` to `.env` and fill it in. Nothing in `.env` is ever printed
-by any script in this repo; probes mask secrets before writing findings.
-
-### `ALTANA_CHAIN=97` — required, and a genuine footgun
-
-**Both the Altana MCP server and the SDK default to BNB MAINNET (chain 56) when
-the network is unset.** In `@altananetwork/mcp` the resolution is literally:
-
-```ts
-const NETWORK = NETWORKS[requestedChain as keyof typeof NETWORKS] ?? BNB;
-```
-
-An unset or misspelled value silently selects mainnet, where transactions move
-real value. Nothing in the log distinguishes it beyond one banner line.
-
-Register the MCP server with the chain pinned explicitly:
-
-```bash
-claude mcp add altana -e ALTANA_CHAIN=97 -- bunx @altananetwork/mcp
-```
-
-Confirm the banner on startup:
-
-```
-[altana-mcp] network: BNB Smart Chain Testnet (chainId 97)
-```
-
-Config alone is not enough, because config drifts silently. Every agent entry
-point calls `assertChain97()` from `apps/agents/src/chain-guard.ts`, which
-reads `eth_chainId` **back off the wire** from the RPC the client is actually
-configured with and throws `WrongChainError` unless it is 97. It runs before any
-signer is constructed. Do not remove it, and do not weaken it to a config read.
-
-### `AGENT_KEY`
-
-Admin signer for the Altana smart account. **Testnet key only.** Read from
-`.env`, never logged. The smart account address equals the signer address: the
-account is an EIP-7702 delegated EOA, not a separate contract address.
-
-## The relay bills the account — it does not sponsor gas
-
-This is easy to get backwards. Altana's relay *submits* transactions, so the
-`from` on every receipt is a relay-operated address rather than your account.
-It does not follow that gas is free. The relay charges the smart account a fee
-in native tBNB, and the account must be funded or execution fails.
-
-Measured on BSC testnet (chain 97):
-
-| Operation | Fee charged to the account | L1 gas used by the relay submitter |
+| Chain | Subgraph ID | What is queried |
 |---|---|---|
-| `grantSession` (+ KeyStore registration) | ~0.00087 tBNB | 967,880 gas (first, incl. account registration) |
-| `execute` one call through a session key | **0.0000324 tBNB** | 199,484 gas |
-| `revokeSession` | ~0.00003 tBNB | 154,259 gas |
-
-The account-side fee and the L1 gas are different numbers; size spend caps
-against the **fee**, not against gas.
-
-Mainnet (chain 56), one observation: the first `execute` (register + 7702
-delegation + KeyStore registration, batched) cost **0.000879383 BNB** against
-1,387,882 gas at 0.05 gwei — a **12.7× markup over raw gas** [M, one
-observation]. The absolute fee lands almost exactly on the testnet
-first-execute figure (~0.00087) even though mainnet quotes a live rate
-(`constantRate: null`) where testnet pins 1.0.
-
-### Spend caps must cover the relay fee
-
-A session's `SpendPermission` on the native token is what pays that fee. A cap
-below it makes the session unusable even for a call that transfers no value:
-
-```ts
-// BROKEN: requestTokens() sends no value, but the session still cannot pay
-// the ~3.2e13 wei relay fee. The bundle is accepted and never mined.
-spend: [{ limit: 1n, period: 'hour' }]
-
-// WORKS
-spend: [{ limit: 10_000_000_000_000_000n, period: 'hour' }]  // 0.01 tBNB
-```
-
-## SDK footguns
-
-Three behaviours that cost us real debugging time. All confirmed against
-`@altananetwork/sdk` 0.8.0 on chain 97.
-
-### 1. Mainnet is the silent default
-
-Covered above under `ALTANA_CHAIN`. Unset or misspelled selects chain 56.
-
-### 2. Spend caps must cover the relay fee
-
-Covered above. A cap below the relay fee makes a session unusable even for a
-call that transfers no value, and the bundle is accepted then never mined.
-
-**The surfacing is fixed upstream**, in
-[altana-sdk#66](https://github.com/altananetwork/altana-sdk/pull/66) (merged
-2 Sep 2026, shipped in 0.9.0): relay statuses are classified by EIP-5792 band,
-so a rejection now fails in about 355 ms with `statusCode: 300` attached instead
-of a 240-second hang ending in a wrong `PENDING`. **On 0.8.0 you still get the
-hang.** The sizing rule is unchanged either way — the cap must cover the relay
-fee, and 0.9.0 adds a `grantSession` warning saying so, because a fast, correct
-error still leaves you with a session that cannot transact.
-
-### 3. `grantSession` silently generates an ephemeral session signer
-
-If you do not pass `sessionSigner`, the SDK generates one and returns it on the
-`Session`. It exists **only in process memory**. Let the process exit without
-persisting it and you are left with a registered, live, on-chain permission
-whose key no longer exists anywhere. We did exactly this and had to revoke and
-re-grant.
-
-The documented remedy — "Persist the `Session` object verbatim" — is not
-followable, because `Session.signer` carries a `signDigest` closure:
-
-```js
-JSON.parse(JSON.stringify(signer))
-// keeps:  type, address, publicKey, _privateKey   <-- raw key written to your store
-// drops:  signDigest                              <-- restored object cannot sign
-```
-
-So the naive persist writes the secret to disk *and* loses the capability.
-
-**Fixed upstream** in
-[altana-sdk#67](https://github.com/altananetwork/altana-sdk/pull/67) (merged
-2 Sep 2026, shipped in 0.9.0): there are now `serializeSession` /
-`deserializeSession` helpers, `_privateKey` is non-enumerable so no stringify or
-spread can capture it, and `grantSession` warns when called without a
-`sessionSigner` — the exact combination that stranded us. **On 0.8.0 every word
-above still applies.** Re-running our repro upstream also found a third failure
-we had not reported: `JSON.stringify` *throws* on any session carrying a spend
-cap, because the limits are bigints — so the documented advice failed three
-ways, not two.
-
-The habit below is worth keeping regardless of version: supplying your own
-signer means the key's lifetime is a decision you made, not a side effect of
-whether a helper happened to persist it.
-
-**Always supply and persist your own session signer:**
-
-```ts
-import { generatePrivateKey } from 'viem/accounts';
-import { signerFromPrivateKey } from '@altananetwork/sdk';
-
-const sessionKey = generatePrivateKey();
-const sessionSigner = signerFromPrivateKey(sessionKey);
-
-// .secrets/ is gitignored; dir 0700, file 0600. NOT /tmp — macOS clears it on
-// reboot and periodically otherwise, which reproduces the lost-key failure.
-mkdirSync(SECRETS, { recursive: true, mode: 0o700 });
-writeFileSync(resolve(SECRETS, 'session.key'), sessionKey, { mode: 0o600 });
-
-const session = await client.grantSession({
-  wallet, signer: adminSigner, sessionSigner,   // <-- never omit this
-  permissions: { calls, spend }, expiry, register: true,
-});
-```
-
-Persist the serialisable half separately — `walletAddress`, `publicKey`,
-`permissions`, `expiry` — and rebuild the signer from the stored key on boot.
-
-Revocation does **not** need the session signer: `revokeSession` accepts
-`Session | Hex` (the public key) and is signed by the admin. A lost session key
-is recoverable by revoking, not by resigning yourself to it.
-
-### 4. `ERC8183_ADDRESSES[97].policy` is not whitelisted
-
-The policy the SDK ships for chain 97 (`0x4F4678D4439feC812Ac7674Bb3Efb4C8f5Fb78A6`)
-is not whitelisted on the EvaluatorRouter. Every hire reverts at `registerJob`
-with `PolicyNotWhitelisted()` — selector `0xc94463e3`. The working address is
-`0xd6a4217588F6B1F5657a92A3e94E6422aD771cEA`, confirmed three ways: the router's
-own `policyWhitelist()` read, the operator manifest in
-`bnb-chain/bnbagent-sdk/networks/addresses.py`, and upstream issue
-[#53](https://github.com/altananetwork/altana-sdk/issues/53).
-
-**Fixed upstream: 0.9.0 ships the correct address.** Unpacking the published
-tarball, `0xd6a42175…` is what it exports and `0x4F4678D4…` is gone. **On 0.8.0
-the broken address is still what you get**, which is why the override below
-exists and why it is written as a no-op once upstream is right.
-
-```
-router.policyWhitelist(0x4F4678D4…) = false     <- what 0.8.0 exports
-router.policyWhitelist(0xd6a42175…) = true      <- what 0.9.0 exports
-```
-
-`src/erc8183/addresses.ts` reads the struct from the SDK, overrides `.policy`,
-and asserts `router.policyWhitelist(policy)` at startup — so the override becomes
-a harmless no-op once upstream ships the fix, and the assert catches any future
-drift either way.
-
-### 5. The builders are the override seam — not the high-level functions
-
-This cost us a failed transaction *after* the override in footgun 4 was already
-in place. `hireErc8183Agent()` and `settleErc8183Job()` resolve contract
-addresses through the SDK's own internal `erc8183Addresses(chainId)`. They do
-**not** accept an addresses argument, so a corrected struct never reaches them.
-
-**This is by design, not a bug.** The maintainer stated it plainly in
-[altana-sdk #68](https://github.com/altananetwork/altana-sdk/pull/68): the
-high-level functions bind to the bundled registry deliberately, and the
-low-level builders are where you inject addresses. We found that the hard way
-rather than from the docs, which is why it is recorded here — the seam is real
-and correct once you know where it is:
-
-```ts
-// BINDS TO THE BUNDLED REGISTRY: uses the SDK's policy, reverts 0xc94463e3
-await hireErc8183Agent(wallet, signer, params, { network: BNB_TESTNET });
-
-// THE SEAM: buildHireCalls takes an explicit `addresses`
-const calls = buildHireCalls({ addresses: erc8183For(97), jobId, provider, description, budget, expiredAt });
-await client.execute({ wallet, signer, calls });
-```
-
-The lesson is unchanged and is the general one: asserting the value you *built*
-proves nothing about the value the SDK *uses*. Assert, then make sure the
-asserted value is actually on the wire.
-
-### 6. Venus `markets()` returns seven words, and CF is not the liquidation threshold
-
-Venus's Comptroller is a **Diamond on both chains** (mainnet included — it is not
-the legacy Unitroller layout). `markets(vToken)` returns:
-
-```
-w0 isListed | w1 collateralFactor | w2 isVenus
-w3 liquidationThreshold | w4 liquidationIncentive | w5,w6 reserved
-```
-
-Decoding it as the legacy `(bool,uint256,bool)` silently truncates and hands you
-`collateralFactor` where you wanted `liquidationThreshold`. They differ in
-practice — chain-56 vADA is CF 0.00 / LT 0.63; chain-97 vBNB is CF 0.70 / LT 0.80.
-A health factor computed from `collateralFactor` is the *borrowing-power* ratio,
-not the liquidation ratio, and understates safety. Using `liquidationThreshold`
-reproduces `getAccountLiquidity()` exactly (verified to 4 dp on a live position).
-
-`liquidationIncentiveMantissa()` does not exist on either chain — checked via
-`facetAddress()` and by scanning all five facets' bytecode. The per-market
-incentive is `w4` (`1.1e18` = a 10% liquidator bonus).
-
-### 7. Two kernel behaviours found while building wallet-native hiring
-
-- **Short-expiry jobs are rejected.** `createJob` with `expiredAt` ~75s out
-  reverts with custom error `0xf7a0748c`; the kernel enforces a minimum job
-  duration (our standard 3600s passes).
-- **A plain EOA `settle` reverts — only the relay path lands.** Even from the
-  provider address itself, `settle(uint256,bytes)` sent as an ordinary
-  transaction reverts on both the router and the commerce contract; the same
-  calldata through the relay (`client.execute` to the router) settles fine.
-  See `apps/agents/src/scripts/settle_ids.ts`.
-
-### 8. Two canonicalisation rules exist in the deliverable corpus
-
-Every deliverable's keccak256 is stored on chain, and the hash depends on how a
-non-ASCII character is encoded before hashing. Our corpus contains **both**
-rules, split by *when the job was submitted*, not by what it contains:
-
-| rule | encoding | jobs |
-|---|---|---|
-| `raw` | the character as UTF-8, what `JSON.stringify` emits | 748, 754, 757 |
-| `escaped` | one `\uXXXX` per UTF-16 code unit (Python `ensure_ascii=True`) | 795, 796 |
-
-Jobs 753, 765 and 797 are pure ASCII, so they reproduce under either.
-
-The producer changed rule partway through the project. `apps/web/lib/verify.ts`
-implemented `raw` only, and its header asserted that the single path was "proven
-against all five deliverables". **That assertion was true and still useless**:
-of the five published at the time, three predate the change and two are pure
-ASCII, so the test set could not distinguish the rules at all. A green suite
-proved nothing about the property it claimed.
-
-It surfaced only when jobs 795 and 796 were recovered from chain and refused to
-reproduce. Publishing them under the old assumption would have rendered a
-**false MISMATCH** — the page telling a reader not to trust a deliverable that
-is provably correct, which is strictly worse than publishing no manifest at all.
-
-The fix has two halves, and the second is the one that matters:
-
-1. Each deliverable records the rule it was hashed under; `manifestHash` takes
-   it as an argument; the VERIFY block and its copy-paste reproduce command both
-   state the rule they used, so the page cannot describe one rule and run
-   another.
-2. `apps/web/tests/deliverables-canon.test.mjs` asserts every deliverable
-   reproduces under its declared rule **and that the non-ASCII ones fail under
-   the other one**. Without that second assertion the per-job label decays into
-   decoration the moment someone mislabels an entry.
-
-If a hash depends on an encoding choice, a test set with no non-ASCII cases
-cannot tell you the encoding is right. Add a case that fails under the wrong
-rule, or you have not tested it.
-
-### 9. Anything you await in the root layout prices the whole site
-
-Two bugs of the same shape, one loud and one quiet. Both came from a single
-`await` in `SiteFooter`, which `app/layout.tsx` renders on every page.
-
-**The loud one: one `no-store` made every route dynamic.** The footer's LAST JOB
-strip read the chain with `cache: 'no-store'`. An uncached fetch opts its route
-out of static rendering, and because this one lives in the root layout, that was
-*every* route. The symptoms did not point at the footer: twelve
-`export const revalidate = 86400` declarations were silently inert, every page
-served `x-vercel-cache: MISS` with `private, no-cache, no-store`, every request
-paid a fresh server render, and the keepalive's "warm the cache" step warmed
-nothing at all. The build output is where it shows: every page route was
-`ƒ (Dynamic)` and should have been `○`/`●`.
-
-**The quiet one: a 60-second default set the ceiling for the site.** With the
-`no-store` removed, the first cacheable build reported a revalidate interval of
-**1m for every route**. Nothing declares 1m. It came from `sbSelect`'s default
-of `revalidate: 60` on one footer row read, because
-[Next's rule](https://nextjs.org/docs/app/api-reference/functions/fetch) is that
-a `fetch` with a lower `revalidate` than its route *lowers the whole route's
-interval*. In the root layout, "the whole route" means all of them.
-
-So the layout sets a ceiling nothing else can raise:
-
-```
-route declares          revalidate = 86400   (24h)
-one footer fetch says   revalidate = 60      (1m)
-the site gets                             -> 1m
-```
-
-The lesson is not "avoid no-store". It is that **the root layout is a global
-config surface disguised as a component**. A fetch added there does not affect
-one page, it re-prices every page, and neither symptom names the file
-responsible — you find it by reading the build's route table, not the code that
-looks wrong.
-
-Both footer reads are now pinned to one shared constant.
-
-## Considered and declined
-
-### EIP-5792 batching — blocked upstream, not deferred
-
-We looked at `wallet_sendCalls` to collapse the five hire transactions
-(approve, createJob, registerJob, setBudget, fund) into one signature. The
-tooling is not the obstacle: wagmi 3.7.7 already exports `useSendCalls`,
-`useCapabilities`, `useCallsStatus` and `useWaitForCallsStatus`.
-
-**The blocker is that the jobId does not exist until `createJob` executes.**
-Three of the five calls take it, and a batch has to be built before any of it
-runs, so a batched hire would have to assume `counter + 1` is ours — and lose
-the race to another buyer funding between the read and the send. Lose it inside
-an atomic batch and the whole hire reverts; lose it inside a non-atomic batch
-and the budget and funds bind to somebody else's job.
-
-> **Corrected 8 Sep 2026.** This entry used to say ERC-8183 has "no
-> caller-scoped or deterministic job id". That is false. `createJob` emits
-> `JobCreated(uint256 jobId, address client, address provider, …)` with the
-> first three parameters **indexed**, so the id is in `topic1` of a log our own
-> transaction produced, keyed by client in `topic2`. The buyer now reads it
-> straight from that receipt, and the `jobCounter()` guess and its
-> `[+0,+1,+2,+3,−1]` candidate walk are gone; the description-nonce check
-> survives as a second gate. What the id *is* was never the problem — *when* it
-> exists is, and that is unchanged, so the conclusion below stands.
->
-> The related report,
-> [bnbagent-sdk #82](https://github.com/bnb-chain/bnbagent-sdk/issues/82), is
-> about a **provider** sweeping FUNDED jobs, where provider and status genuinely
-> cannot single out one job. The event does not help there — a seller did not
-> send the buyer's transaction. It was our buyer-side workaround that was
-> unnecessary.
-
-The cost side is not compelling either, so this is not a close call waiting on
-time:
-
-- **A judge would be asked to change their account type mid-hire.** MetaMask
-  reports `atomic: { status: "ready" }` for a plain EOA, which means it prompts
-  the user to upgrade to a MetaMask smart account (EIP-7702) before it will
-  batch. BNB Smart Chain Testnet is on its supported list, so this is the
-  behaviour a judge would actually meet.
-- **The gas saving is ~13%.** Measured from job 844: 626,231 gas across the five
-  transactions; batching saves roughly four base transaction costs, about 84,000
-  gas. At testnet gas prices that is noise.
-- **The five-stage indicator collapses.** `wallet_sendCalls` returns one batch
-  id and `wallet_getCallsStatus` reports batch-level status; EIP-5792 does not
-  guarantee one receipt per call, so under atomic execution there is nothing to
-  drive per-step progress. On a partial failure (status `600`) you learn that
-  something landed, not which — you would re-derive it by reading `getJob` and
-  matching the nonce, which is the code the batch was supposed to replace.
-
-If the kernel ever exposes a job id the caller can compute in advance, the
-blocker goes away and this is worth revisiting. Until then the sequential path
-stays: it has completed a full wallet hire on chain, including recovery from a
-stuck FUNDED job.
-
-## Verified contracts
-
-Re-checked with `eth_getCode` on 2 Sep 2026, at the addresses the code actually
-uses, on the chain it uses them on.
-
-| Contract | Chain | Address | Bytecode | Implementation |
+| BSC Mainnet (56) | `D6aWqowLkWqBgcqmpNKXuNikPkob24ADXCciiP8Hvn1K` | Agents, registration files, feedback + feedback files, validations, protocol + agent rollups |
+| Ethereum Mainnet (1) | `FV6RR6y13rsnCxBAicKuQEwDp8ioEGiNaWaZUmvr1F8k` | Adoption rollup, agents-with-feedback count |
+| Base Mainnet (8453) | `43s9hQRurMGjuYnC1r2ZwS6xSQktbFyXMPMqGKUFJojb` | Adoption rollup, agents-with-feedback count |
+| Polygon Mainnet (137) | `9q16PZv1JudvtnCAf44cBoxg82yK9SSsFvrjCY9xnneF` | Adoption rollup, agents-with-feedback count |
+| Monad Mainnet (143) | `4tvLxkczjhSaMiqRrCV1EyheYHyJ7Ad8jub1UUyukBjg` | Same pattern; indexer currently unavailable (handled, see below) |
+
+Why it is load-bearing rather than decorative:
+
+- **Every claim Scout makes comes from a subgraph query, and you can read the query.** The
+  Evidence panel under each answer lists the GraphQL document, the variables, the row count
+  and the latency for every call the answer rests on. The system prompt forbids stating any
+  number that did not come from a tool result.
+- **The adoption page is one query pattern run across five deployments of one schema.**
+  Because Agent0 standardises the schema, comparing BSC to Base is the same code with a
+  different subgraph ID — that is the composability argument made concrete.
+- **Nested filters make search work across the whole registry.** `Agent_filter` exposes
+  `registrationFile_`, so `or: [{ name_contains_nocase }, { description_contains_nocase }]`
+  searches all **345,162** BSC agents server-side. The naive fallback — page the top N and
+  filter in JS — would have searched 5,000 and silently missed the rest.
+- **It independently cross-checks our own measurement.** AgenSea's full on-chain sweep put
+  BSC adoption at **1.35%**; The Graph puts it at **1.3%**. Two methods, two data paths, the
+  same answer. One number from one source is just a number.
+
+## Key findings from the data
+
+Live at the `fetchedAt` stamp on [`/api/graph/adoption`](https://agensea-graph.vercel.app/api/graph/adoption)
+(figures below: 11 Sep 2026, 20:06 UTC).
+
+| Chain | Registered | With feedback | Adoption | Feedback created |
 |---|---|---|---|---|
-| IdentityRegistry | 56 | `0x8004a169fb4a3325136eb29fa0ceb6d2e539a432` | 130 bytes — proxy | `0x7274e874ca62410a93bd8bf61c69d8045e399c02` · 14,474 bytes |
-| ReputationRegistry | 56 | `0x8004baa17c55a88189ae136b182e5fda19de9b63` | 130 bytes — proxy | `0x16e0fa7f7c56b9a767e34b192b51f921be31da34` · 10,491 bytes |
-| Multicall3 | 56 | `0xcA11bde05977b3631167028862bE2a173976CA11` | 3,808 bytes | — |
-| ERC-8183 commerce kernel | 97 | `0xa206c0517B6371C6638CD9e4a42Cc9f02A33B0DE` | 130 bytes — proxy | `0x153783ddbdf5233c591965f04644b1df2d1a7815` · 10,892 bytes |
-| EvaluatorRouter | 97 | `0xD7d36D66d2F1B608A0F943f722D27e3744f66F25` | 130 bytes — proxy | `0x40c0254610d92f1eb9c2d7d5d2114bc4c99d935e` · 6,685 bytes |
-| OptimisticPolicy | 97 | `0xd6a4217588F6B1F5657a92A3e94E6422aD771cEA` | 4,413 bytes | — |
-| KeyStore | 97 | `0x6b8361C29d05D498b1a12B54A37310f94171E94A` | 8,756 bytes | — |
-| KeyStoreController | 97 | `0xb530D1971f5453F3359518343F05D0AedFfF7e12` | 3,609 bytes | — |
-| $U token | 97 | `0xc70B8741B8B07A6d61E54fd4B20f22Fa648E5565` | 2,007 bytes | — |
-| $U faucet | 97 | `0x86e9197CC0F76E4e4aaa7082180945196bBAb5D3` | 1,402 bytes | — |
+| Base Mainnet | 86,093 | 29,783 | **34.6%** | 473,623 |
+| Polygon Mainnet | 658 | 159 | **24.2%** | 499 |
+| Ethereum Mainnet | 50,781 | 1,681 | **3.3%** | 3,445 |
+| BSC Mainnet | 345,162 | 4,448 | **1.3%** | 29,814 |
+| Monad Mainnet | — | — | indexer unavailable | — |
 
-**Four of them return exactly 130 bytes — the ERC-1967 proxy stub.** The earlier
-version of this table said only that every address "was verified with `cast
-code`", directly under a warning never to take an address from documentation
-without checking it has bytecode. Both halves were true and the pair was
-misleading: a 130-byte answer proves a proxy is deployed at that address, not
-that the logic you are about to call is behind it. The implementation column
-resolves each proxy's ERC-1967 implementation slot and sizes what is actually
-there.
+- **The headline: registration is not adoption.** BSC has by far the most agents and by far
+  the lowest share that anyone has ever reviewed.
+- **The `*Stats` aggregations are CUMULATIVE running totals, not per-bucket deltas.** Summing
+  the daily buckets of `protocolAgentStats_collection` yields 29,025,949 "registrations" on a
+  chain whose highest agentId is ~345k. The correct read is the single latest bucket with
+  `current: include`. This is the easiest way to get a confidently wrong number out of this
+  schema.
+- **`Feedback.value` has no fixed unit — `tag1` defines it.** 100 under `uptime` is a
+  percentage; 236 under `responseTime` is milliseconds. Averaging across tags is meaningless,
+  so `TrustSignals` exposes per-tag stats and deliberately has no overall mean anywhere.
+- **No validation registry is deployed on any live chain.** Every
+  `Protocol.validationRegistry` is the zero address, so zero validations is expected and is
+  not evidence against an agent. Scout is told this explicitly.
+- **Monad's indexer has been returning `bad indexers … Unavailable` throughout.** The ID is
+  correct (from The Graph's own catalogue); the deployment does not answer. `Promise.allSettled`
+  reports it as `{ ok: false }` and the UI renders "indexer unavailable" with **no bar** — a
+  zero-length bar would assert a 0% measurement we do not have.
 
-Same shape as footgun 8: a check that passes without testing the property it
-asserts. "It has bytecode" is not "it has the code you think"; the follow-through
-is reading the implementation slot, and the failure mode of skipping it is
-believing you verified something you did not.
+## Architecture
 
-The faucet pays **10 $U per address per 30 minutes**. A second `requestTokens()`
-inside that window reverts with empty revert data (`0x`), which surfaces from
-the SDK as `Rpc.ExecutionError ... Reason: 0x` at `prepareCalls` — a pre-flight
-simulation failure, not a session-permission failure. Do not misread it as a
-scope problem.
+```
+Scout (reasoning path, dynamic)
+  browser  ──►  /scout (static page)
+                   │  POST
+                   ▼
+              /api/scout ──► AI SDK tool loop (max 8 steps, 56s budget)
+                   │           ├─ search_agents        ─┐
+                   │           ├─ get_trust_profile    ─┤
+                   │           ├─ get_chain_adoption   ─┤──► lib/graph ──► gateway.thegraph.com
+                   │           └─ emit_verdict          │       (server-only,      │
+                   │              (deduped server-side) │        10s timeout)      ▼
+                   │                                    │              Agent0 subgraphs (x5)
+                   │           lib/scout/analysis.ts ◄──┘
+                   │              (pure arithmetic: concentration,
+                   │               burstiness, per-tag stats, flags)
+                   ▼
+           UI message stream ──► answer · verdict cards · Evidence panel
+                                 (every GraphQL query, rows, latency)
 
-The tBNB gas dispenser's per-IP daily cap is keyed on `x-forwarded-for`, so
-judges behind one NAT or a shared conference network share a single grant
-between them; the sponsored path is the fallback when it refuses.
+Adoption (cached path, static)
+  /adoption page ─┐
+                  ├─► cachedAdoptionSnapshot()  ──►  lib/graph ──► Agent0 subgraphs (x5)
+  /api/graph/…  ─┘    unstable_cache, 3600s, tag "agent0-adoption"
+  Scout's get_chain_adoption reads the SAME entry, so the three can never disagree.
+```
 
-## Running things
+## Run it locally
+
+Requires **Node 24+** (the tests rely on native TypeScript type stripping) and a free
+[The Graph API key](https://thegraph.com/studio/apikeys/).
 
 ```bash
-# indexer
-cd apps/indexer && npm run ingest && npm run stats
+git clone https://github.com/shrooms08/agensea-graph.git
+cd agensea-graph
 
-# agents
-cd apps/agents && ALTANA_CHAIN=97 npm run retry
+# The web app, plus the agents workspace it imports from (same as Vercel's installCommand)
+npm --prefix apps/web install
+npm --prefix apps/agents install --omit=dev
 ```
 
-## Sweep runbook — what to re-run after a delta sweep
-
-Data on the site comes from three places with **different staleness behaviour**.
-Run every step; skipping the last one leaves a public asset silently wrong.
+Create `.env.local` **at the repo root** (not in `apps/web` — `with-root-env.sh` exports it),
+using [`.env.example`](.env.example) as the reference. The Trust Layer needs only:
 
 ```bash
-# 1. Extend the agent sweep from the stored cursor to current head
-cd apps/indexer && npm run delta
-
-# 2. Re-ingest the B402 Bazaar catalogue
-npm run ingest
-
-# 3. Re-enrich agents that have clients (needed, or agent_liveness_with_clients
-#    inner-joins away the newly-live agents and the view disagrees with the stats)
-npm run pass2
-
-# 4. Recompute the fan-out curve and refresh registry_stats with a new
-#    measured_at  (SQL: select * from public.refresh_fanout();  then upsert
-#    registry_stats — see apps/indexer/sql/004_fanout.sql)
-
-# 5. REGENERATE THE OG CARD — see below.
-#    genog.mjs reads /tmp/og_stats.json, NOT Supabase. Dump it first or the
-#    script dies with ENOENT.
-curl -s "$SUPABASE_URL/rest/v1/registry_stats?select=key,value,measured_at,note&order=key.asc" \
-  -H "apikey: $SUPABASE_SERVICE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
-  > /tmp/og_stats.json
-cd apps/web && npx tsx genog.mjs
-
-# 6. Redeploy. The card is a build asset; step 7 cannot update it.
-git add app/opengraph-image.png app/twitter-image.png && git commit && git push
-
-# 7. Push the new data to the live site
-curl -X POST -H "Authorization: Bearer $REVALIDATE_SECRET" \
-  https://agensea-navy.vercel.app/api/revalidate
-
-# 8. Verify by CONTENT — see below. Not deploy status, and not a local build.
-#    Substitute the ceiling this sweep just wrote.
-curl -s https://agensea-navy.vercel.app/docs | grep -c '341,288'
-#    And confirm the served card IS the one you just built, by bytes:
-curl -s https://agensea-navy.vercel.app/opengraph-image.png | shasum -a256
-shasum -a256 apps/web/app/opengraph-image.png    # must match
+THEGRAPH_API_KEY=            # required: every subgraph read
+LLM_PROVIDER=groq            # groq | google | anthropic | openai  (default groq)
+LLM_FALLBACK_PROVIDER=google # used only on a daily-quota 429; "none" disables
+GROQ_API_KEY=                # key for whichever provider is active
+GOOGLE_GENERATIVE_AI_API_KEY=# key for the fallback
 ```
 
-### The OG card drifts silently — this is the one to remember
-
-Every figure rendered in the app is read live from `registry_stats`, so it
-cannot go stale. **`app/opengraph-image.png` is the exception**: it is a static
-PNG baked from `registry_stats` at generation time, and it is what renders when
-the URL is pasted into Discord, Twitter, Telegram or a submission form.
-
-Nothing fails if you forget it. The site will be correct and the social card
-will quietly show last week's numbers under a `measured …` date that no longer
-matches. Treat `npx tsx genog.mjs` as part of the same checklist as
-`/api/revalidate` — they are the two steps that publish data rather than compute
-it, and only one of them is visible in the app.
-
-A redeploy is required after regenerating: the card is a build asset, not an
-ISR page, so `/api/revalidate` does **not** update it.
-
-### Verify by content — and a local build is not content
-
-The card above is the visible half of a general rule: **check what the deployed
-site actually serves.** Not deploy status, not a green build. The case that
-caught us was subtler than the card, because it looks exactly like verification.
-
-`npm run build` locally does **not** give a faithful preview of any ISR page.
-Next caches data fetches in `.next/cache/fetch-cache` keyed by the route's
-`revalidate`, and `lib/queries.ts` reads `registry_stats` with `revalidate: DAY`.
-So a local build replays whatever response was cached, for up to 24 hours,
-regardless of what the database now says.
-
-On 8 Sep this produced a prerendered `/docs` carrying the 31 Aug ceiling
-(322,974) an hour after the sweep had written 341,288 — and silently omitted an
-entire conditional block, because the `registry_stats` keys it tests for did not
-exist when the cache entry was written. The build succeeded. Nothing warned. The
-page looked verified and was a week stale.
+`/scout` and `/adoption` need nothing else. The **pre-existing** pages additionally need
+`SUPABASE_URL` and `SUPABASE_ANON_KEY`; without them the shared layout throws at module
+evaluation and every route 500s, so set them to any placeholder if you only want the Trust
+Layer.
 
 ```bash
-rm -rf apps/web/.next/cache/fetch-cache   # before any build you intend to trust
+cd apps/web
+npm run dev:env          # loads the repo-root .env.local, serves on :3111
 ```
 
-**Vercel is unaffected** — its builds start from a clean data cache, which is why
-the deployed site was correct throughout while the local build was wrong. That
-asymmetry is the whole trap: the local build is the one that lies, and it is the
-one you are tempted to believe because you just ran it.
+Open [http://localhost:3111/scout](http://localhost:3111/scout),
+[http://localhost:3111/adoption](http://localhost:3111/adoption), and
+[http://localhost:3111/api/graph/adoption](http://localhost:3111/api/graph/adoption).
 
-### `refresh_fanout()` cannot be called through PostgREST
-
-Step 4 says SQL and it means SQL. `POST /rest/v1/rpc/refresh_fanout` fails with:
-
-```json
-{"code":"21000","message":"DELETE requires a WHERE clause"}
+```bash
+npm run graph:smoke      # proves the data layer against all five live subgraphs, no LLM
+npm test                 # 86 assertions, no network, no model
+npm run typecheck
 ```
 
-The function opens with unqualified `delete from public.client_fanout;` and
-`delete from public.agent_fanout_curve;`, and PostgREST connects as the
-`authenticator` role, which carries:
+`graph:smoke` is the fastest way to confirm your Graph key works: it prints the adoption
+rollup per chain, five BSC agent names, and a full trust profile as JSON.
 
-```
-authenticator => session_preload_libraries=supautils, safeupdate
-               | statement_timeout=8s | lock_timeout=8s
-```
+## AI usage disclosure
 
-`safeupdate` is preloaded per session, so it is in force inside the function
-body too. Nothing in the SQL is wrong; adding `where true` to silence it would
-be defeating a safety net rather than using the right door. Note the second
-reason on that same line: `statement_timeout=8s` — a full curve rebuild over
-109 clients has no business racing an 8-second budget either.
+- **Claude (claude.ai)** acted as tech lead: it wrote the plans and the prompts.
+- **Claude Code** executed all of the coding from those prompts. Every prompt is saved
+  verbatim and in order in [`docs/hackathon/prompts/`](docs/hackathon/prompts/) —
+  `01-graph-data-layer`, `02-scout`, `03-groq-provider`, `04-adoption-page`, `05-hardening`,
+  `06-readme`. The commit history maps onto them one-to-one.
+- **Minos** directed the product decisions, ran every deploy and test, and reviewed the
+  output at each step.
+- At **runtime**, Scout is powered by Groq `openai/gpt-oss-120b`, with Gemini
+  `gemini-3.8-flash` as the daily-quota failover. The model chooses which tools to call and
+  writes the prose; it does not compute any trust signal — that arithmetic is in
+  `lib/scout/analysis.ts` and is unit-tested.
 
-Run it from the Supabase SQL editor, `psql`, or an MCP `execute_sql`. Those
-connect as a role without the preload, and it returns
-`(clients_out, breakpoints_out)` in well under a second.
+## Known limitations
 
-### `genog.mjs` reads a file nothing creates
+- **Groq's free tier is 200,000 tokens/day.** Scout spends one request per reasoning step,
+  so heavy use exhausts it. When that happens the daily-quota classifier routes the next
+  request to Gemini and the "answered by" line under the answer names the model that
+  actually replied. If both are exhausted, Scout says so rather than failing silently.
+- **Monad's subgraph is unavailable** and has been throughout. It renders as "indexer
+  unavailable", never as 0%.
+- **No chain has a validation registry**, so Scout's `VALIDATION_UNAVAILABLE` flag fires on
+  every agent and is informational only.
+- **`NAME_LOOKALIKE` is a heuristic** against a hand-kept list of well-known handles. It has
+  false positives and false negatives, is flagged `heuristic: true`, and is reported as
+  "worth verifying" — never as proof of impersonation.
+- **A Scout answer takes roughly 5 to 50 seconds.** Free-tier latency is highly variable; a
+  56s deadline stops the tool loop in time to still write a summary, and says so if it fires.
+- **`agentsWithFeedback` is paginated with a 40-page cap.** Above 40,000 the figure becomes a
+  lower bound, flagged by `agentsWithFeedbackExact: false` and rendered with a `+`.
 
-The script takes its figures from `/tmp/og_stats.json`, not from Supabase. No
-step in this runbook wrote that file, so a clean run died with:
+## Demo video
 
-```
-Error: ENOENT: no such file or directory, open '/tmp/og_stats.json'
-```
+<!-- TODO: paste the ETHGlobal demo video link here before submitting -->
+_To be added._
 
-Step 5 above now dumps it. It must be the raw PostgREST array — the script
-indexes it by `key` and reads `agents_minted.measured_at` for the `measured …`
-date printed on the card.
+## Licence
+
+**Not yet licensed.** This repository has no `LICENSE` file. The Continuity pool and The
+Graph's track both expect open source, so a licence (MIT or Apache-2.0) should be added
+before submitting — until then "open source" is an intention, not a grant.
