@@ -481,3 +481,165 @@ export async function getAllChainsAdoption(): Promise<ChainAdoptionResult[]> {
     };
   });
 }
+
+/* -------------------------------------------------------------------------- */
+/* searchAgents                                                                */
+/* -------------------------------------------------------------------------- */
+
+export interface SearchAgentsArgs {
+  chainId: number;
+  /** Free text matched against registrationFile name and description. */
+  text: string;
+  first?: number;
+  /** Only agents that have been reviewed at least once. */
+  withFeedbackOnly?: boolean;
+}
+
+/**
+ * Find agents whose registration file name or description matches `text`.
+ *
+ * NESTED FILTERS ARE SUPPORTED — the fallback the schema notes warned about is
+ * not needed. `Agent_filter` really does expose `registrationFile_`, which
+ * takes a full `AgentRegistrationFile_filter`, and the top-level `or` composes
+ * two of them. Verified against the live BSC subgraph:
+ *
+ *   where: { or: [ { registrationFile_: { name_contains_nocase: "yield" } },
+ *                  { registrationFile_: { description_contains_nocase: "yield" } } ] }
+ *
+ * So this is one server-side query over the whole registry, not five pages of
+ * 1,000 filtered in JS — which matters at 344,815 agents on BSC, where the
+ * client-side approach would have searched the top 5,000 by feedback and
+ * silently missed everything else.
+ *
+ * Ordering by totalFeedback desc means the most-reviewed match comes first,
+ * which is what "find me an agent that actually does X" wants.
+ */
+export async function searchAgents({
+  chainId,
+  text,
+  first = 10,
+  withFeedbackOnly = false,
+}: SearchAgentsArgs): Promise<Agent[]> {
+  const subgraphId = subgraphIdFor(chainId);
+  const term = text.trim();
+  if (!term) return [];
+
+  // `or` branches are combined with the feedback restriction inside each
+  // branch: a top-level sibling key would AND with the whole `or`, which
+  // graph-node accepts but which reads ambiguously. Explicit is safer.
+  const feedbackClause = withFeedbackOnly ? { totalFeedback_gt: 0 } : {};
+  const where = {
+    or: [
+      { ...feedbackClause, registrationFile_: { name_contains_nocase: term } },
+      { ...feedbackClause, registrationFile_: { description_contains_nocase: term } },
+    ],
+  };
+
+  const query = `
+    query SearchAgents($first: Int!, $where: Agent_filter!) {
+      agents(first: $first, orderBy: totalFeedback, orderDirection: desc, where: $where) {
+        ${AGENT_FIELDS}
+        registrationFile { ${REGISTRATION_FILE_FIELDS} }
+      }
+    }
+  `;
+
+  const data = await graphQuery<{ agents: Agent[] }>(subgraphId, query, {
+    first: Math.min(first, MAX_PAGE),
+    where,
+  });
+  return data.agents;
+}
+
+/* -------------------------------------------------------------------------- */
+/* getFeedbackForAgent                                                         */
+/* -------------------------------------------------------------------------- */
+
+export interface GetFeedbackForAgentArgs {
+  chainId: number;
+  /** Bare ("30867") or composite ("56:30867"). */
+  agentId: string | number;
+  first?: number;
+}
+
+/**
+ * Feedback for one agent, newest first.
+ *
+ * The reviewer field is `clientAddress` (Bytes), not `reviewer` or `author`.
+ * Ordering is on `createdAt` — Feedback has no `timestamp` field.
+ *
+ * Separate from getAgentTrustProfile so the analysis layer can pull a deeper
+ * history (concentration and burstiness get noticeably better with more than
+ * the profile's default 20) without re-fetching the agent and both rollups.
+ */
+export async function getFeedbackForAgent({
+  chainId,
+  agentId,
+  first = 100,
+}: GetFeedbackForAgentArgs): Promise<Feedback[]> {
+  const subgraphId = subgraphIdFor(chainId);
+  const id = toCompositeId(chainId, agentId);
+
+  const query = `
+    query FeedbackForAgent($agentFilter: String!, $first: Int!) {
+      feedbacks(
+        first: $first
+        orderBy: createdAt
+        orderDirection: desc
+        where: { agent: $agentFilter }
+      ) {
+        id
+        clientAddress
+        feedbackIndex
+        value
+        tag1
+        tag2
+        endpoint
+        isRevoked
+        createdAt
+        revokedAt
+        feedbackFile { id cid text valueRaw valueDecimals createdAtIso }
+      }
+    }
+  `;
+
+  const data = await graphQuery<{ feedbacks: Feedback[] }>(subgraphId, query, {
+    agentFilter: id,
+    first: Math.min(first, MAX_PAGE),
+  });
+  return data.feedbacks;
+}
+
+/* -------------------------------------------------------------------------- */
+/* getProtocol                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The Protocol row for one chain — registry addresses and nothing else.
+ *
+ * O(1) and deliberately separate from getChainAdoption. Callers that only need
+ * a registry address (chiefly "is a validation registry deployed here?")
+ * should never pay for the reviewer count, which is the one non-constant-time
+ * read in this module.
+ */
+export async function getProtocol(chainId: number): Promise<Protocol | null> {
+  const subgraphId = subgraphIdFor(chainId);
+  const query = `
+    query GetProtocol($id: ID!) {
+      protocol(id: $id) {
+        id
+        chainId
+        name
+        identityRegistry
+        reputationRegistry
+        validationRegistry
+        createdAt
+        updatedAt
+      }
+    }
+  `;
+  const data = await graphQuery<{ protocol: Protocol | null }>(subgraphId, query, {
+    id: String(chainId),
+  });
+  return data.protocol;
+}
