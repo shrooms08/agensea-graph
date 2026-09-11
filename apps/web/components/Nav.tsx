@@ -5,6 +5,8 @@ import { usePathname } from 'next/navigation';
 
 const LINKS = [
   ['/marketplace', 'Marketplace'],
+  ['/scout', 'Scout'],
+  ['/adoption', 'Adoption'],
   ['/compare', 'Compare'],
   ['/agents', 'Registry'],
   ['/bazaar', 'Bazaar'],
@@ -13,7 +15,9 @@ const LINKS = [
 export function Nav() {
   const path = usePathname() ?? '/';
   return (
-    <nav style={{ marginLeft: 'auto', display: 'flex', gap: 24 }}>
+    // Class, not an inline style: with six links the row overflows 390px, and
+    // an inline gap cannot be overridden by a media query. See .site-nav.
+    <nav className="site-nav">
       {LINKS.map(([href, label]) => {
         const active = path === href || path.startsWith(href + '/');
         return (
