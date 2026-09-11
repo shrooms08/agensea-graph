@@ -784,3 +784,137 @@ header nav .navlink[data-active='true']::after {
 .docs-table td:first-child { width: 116px; min-width: 116px; }
 .docs-table td:first-child .label { overflow-wrap: normal; word-break: normal; }
 @media (max-width: 900px) { .docs-paths { grid-template-columns: 1fr; } }
+
+/* ---------------------------------------------------------------------------
+   /scout — the trust analyst. No new primitives: the chain chips reuse
+   .cat-switch-chip's shape, the cards are .card-lg, the query blocks are
+   .docs-pre, and the verdict's left rule is the same inset box-shadow trick as
+   .preflight-short. Only the recommendation palette is new, and it is drawn
+   entirely from the existing liveness tokens.
+--------------------------------------------------------------------------- */
+.scout-ask { margin-top: 22px; }
+.scout-field { display: flex; gap: 12px; align-items: stretch; flex-wrap: wrap; }
+.scout-input {
+  flex: 1 1 420px; min-width: 0;
+  font: 400 15px/1.5 var(--display);
+  color: var(--text); background: var(--surface);
+  border: 1px solid var(--border-strong); padding: 14px 16px;
+}
+.scout-input::placeholder { color: var(--text-faint); }
+.scout-input:focus-visible { outline: 1px solid var(--live); outline-offset: 1px; }
+.scout-send {
+  font: 500 12px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase;
+  background: var(--live-dim); color: var(--bg);
+  border: 1px solid var(--live-dim); padding: 14px 22px; cursor: pointer;
+  white-space: nowrap;
+}
+.scout-send:hover:not(:disabled) { background: var(--live); border-color: var(--live); }
+.scout-send:disabled { background: var(--surface-raised); border-color: var(--border); color: var(--text-faint); cursor: default; }
+
+/* Chain selector + example chips share one chip shape. */
+.scout-chips { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.scout-chip {
+  font: 500 10px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-muted); background: transparent;
+  border: 1px solid var(--border); padding: 8px 10px; cursor: pointer;
+}
+.scout-chip:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
+.scout-chip[data-active='true'] { border-color: var(--accent); color: var(--accent); }
+.scout-chip:disabled { opacity: 0.45; cursor: default; }
+.scout-example {
+  font: 400 12px/1.4 var(--display); text-transform: none; letter-spacing: 0;
+  text-align: left; max-width: 100%; overflow-wrap: anywhere;
+}
+
+.scout-status {
+  display: flex; align-items: center; gap: 10px; margin-top: 24px;
+  font: 500 10px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.scout-dot { width: 7px; height: 7px; background: var(--live); display: inline-block; }
+@media (prefers-reduced-motion: no-preference) {
+  .scout-dot { animation: scout-pulse 1.1s ease-in-out infinite; }
+}
+@keyframes scout-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+.scout-answer { margin-top: 10px; }
+.scout-answer p { margin: 0 0 12px; }
+.scout-answer code {
+  font: 400 12px/1.5 var(--mono); color: var(--text);
+  background: var(--surface-raised); padding: 1px 5px; overflow-wrap: anywhere;
+}
+.scout-answer strong { color: var(--text); font-weight: 500; }
+
+.scout-error {
+  margin-top: 20px; padding: 14px 18px;
+  background: var(--surface); box-shadow: inset 2px 0 0 var(--danger);
+  font: 400 14px/1.6 var(--display); color: var(--text-muted);
+}
+
+/* Verdict cards. The left rule carries the recommendation; the badge repeats
+   it in words, because colour alone is not an accessible signal. */
+.scout-verdicts { display: grid; gap: 16px; margin-top: 26px; }
+.scout-verdict { background: var(--surface); border: 1px solid var(--border); padding: 22px 24px; }
+.scout-verdict[data-rec='hire']              { box-shadow: inset 3px 0 0 var(--live); }
+.scout-verdict[data-rec='caution']           { box-shadow: inset 3px 0 0 var(--warn); }
+.scout-verdict[data-rec='avoid']             { box-shadow: inset 3px 0 0 var(--danger); }
+.scout-verdict[data-rec='insufficient_data'] { box-shadow: inset 3px 0 0 var(--text-faint); }
+
+.scout-verdict-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.scout-verdict-name { font: 500 17px/1.25 var(--display); letter-spacing: -0.01em; min-width: 0; overflow-wrap: anywhere; }
+.scout-badge {
+  font: 500 9px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+  border: 1px solid currentColor; padding: 5px 7px; white-space: nowrap;
+}
+.scout-badge[data-rec='hire']              { color: var(--live); }
+.scout-badge[data-rec='caution']           { color: var(--warn); }
+.scout-badge[data-rec='avoid']             { color: var(--danger); }
+.scout-badge[data-rec='insufficient_data'] { color: var(--text-muted); }
+.scout-verdict-id { margin-left: auto; font: 400 10px/1.4 var(--mono); color: var(--text-faint); }
+
+.scout-rows { margin-top: 16px; border-top: 1px solid var(--border); }
+.scout-row {
+  display: grid; grid-template-columns: 132px 1fr; gap: 18px;
+  padding: 11px 0; border-bottom: 1px solid var(--border);
+}
+.scout-row-k { font: 500 9px/1.6 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-faint); }
+.scout-row-v { font: 400 14px/1.65 var(--display); color: var(--text-muted); min-width: 0; overflow-wrap: anywhere; }
+
+.scout-flags { display: flex; gap: 8px; flex-wrap: wrap; }
+.scout-flag {
+  font: 500 9px/1 var(--mono); letter-spacing: 0.1em;
+  color: var(--warn); border: 1px solid #4a3410; padding: 5px 7px; white-space: nowrap;
+}
+.scout-flag[data-tone='info'] { color: var(--text-muted); border-color: var(--border-strong); }
+
+/* Evidence. A native <details> so it works with no JS and is keyboard-
+   operable for free. */
+.scout-evidence { margin-top: 28px; border-top: 1px solid var(--border); padding-top: 18px; }
+.scout-evidence-sum {
+  font: 500 10px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-muted); cursor: pointer; list-style: none;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.scout-evidence-sum::-webkit-details-marker { display: none; }
+.scout-evidence-sum::before { content: '+'; font: 500 12px/1 var(--mono); color: var(--text-faint); }
+details[open] > .scout-evidence-sum::before { content: '−'; }
+.scout-evidence-sum:hover { color: var(--text); }
+.scout-ev-item { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px; }
+.scout-ev-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; font: 400 10px/1.4 var(--mono); color: var(--text-muted); }
+.scout-ev-tool { color: var(--text); }
+.scout-ev-rows { margin-left: auto; color: var(--text-faint); }
+.scout-ev-fail { color: var(--danger); }
+.scout-ev-pre {
+  margin-top: 10px; padding: 12px 14px; overflow-x: auto;
+  font: 400 11px/1.6 var(--mono); color: var(--text-muted);
+  background: var(--surface); border: 1px solid var(--border);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+@media (max-width: 767px) {
+  .scout-row { grid-template-columns: 1fr; gap: 4px; }
+  .scout-verdict { padding: 18px 16px; }
+  .scout-verdict-id { margin-left: 0; width: 100%; }
+  .scout-send { width: 100%; }
+  .scout-ev-rows { margin-left: 0; }
+}
