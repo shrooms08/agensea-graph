@@ -918,3 +918,88 @@ details[open] > .scout-evidence-sum::before { content: '−'; }
   .scout-send { width: 100%; }
   .scout-ev-rows { margin-left: 0; }
 }
+
+/* ---------------------------------------------------------------------------
+   /adoption — the headline chart. Plain divs, no chart library.
+
+   The bar itself is the existing .bar-track/.bar-fill pair from the Bazaar
+   concentration rows, only taller; the scrolling table reuses .cmp-scroll /
+   .cmp-table wholesale. Everything new here is layout.
+--------------------------------------------------------------------------- */
+.adopt-chart { margin-top: 18px; border-top: 1px solid var(--border); }
+/* Grid so the Scout link can sit top-right on desktop while appearing AFTER
+   the bar in DOM order — on a phone the row must read label, bar, action, not
+   label, action, bar, which separates a chain from its own bar. */
+.adopt-row {
+  padding: 16px 0; border-bottom: 1px solid var(--border);
+  display: grid; grid-template-columns: 1fr auto; column-gap: 16px;
+}
+.adopt-row-head {
+  grid-column: 1; grid-row: 1;
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.adopt-track { grid-column: 1 / -1; grid-row: 2; }
+.adopt-scout { grid-column: 2; grid-row: 1; align-self: center; }
+.adopt-name { font: 500 15px/1.2 var(--display); letter-spacing: -0.01em; }
+.adopt-rate { font: 500 15px/1.2 var(--display); letter-spacing: -0.01em; color: var(--live); }
+.adopt-row[data-top='true'] .adopt-rate { color: var(--verified); }
+.adopt-counts { font: 400 11px/1.4 var(--mono); color: var(--text-muted); }
+/* Pushes the Scout link to the right on desktop, and onto its own line at the
+   narrow end rather than crushing the counts. */
+.adopt-scout {
+  font: 500 9px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-muted); border: 1px solid var(--border); padding: 6px 8px;
+  white-space: nowrap;
+}
+.adopt-scout:hover { border-color: var(--border-strong); color: var(--text); }
+
+/* Taller than the 6px Bazaar bar: this is the page's headline, not a sparkline. */
+.adopt-track { height: 14px; background: var(--bg); width: 100%; border: 1px solid var(--border); }
+.adopt-fill { height: 100%; background: var(--live-dim); min-width: 2px; }
+.adopt-row[data-top='true'] .adopt-fill { background: var(--verified); }
+
+/* A chain whose indexer is down. No bar at all — a zero-length bar would read
+   as "0% adoption", which is a measurement we do not have. */
+.adopt-row[data-failed='true'] .adopt-name { color: var(--text-faint); }
+.adopt-unavailable {
+  font: 400 11px/1.4 var(--mono); color: var(--stale);
+  border: 1px dashed var(--border-strong); padding: 8px 10px; display: inline-block;
+}
+
+.adopt-note { font: 400 11px/1.5 var(--mono); color: var(--text-faint); margin-top: 10px; }
+.adopt-foot { font: 400 11px/1.6 var(--mono); color: var(--text-faint); margin-top: 22px; }
+
+/* The table is narrower than /compare's, so it gets its own min-width rather
+   than inheriting 860px and scrolling further than it needs to. */
+.adopt-table { min-width: 720px; }
+.adopt-table th { font: 500 9px/1.6 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-faint); }
+.adopt-table td { font: 400 13px/1.5 var(--mono); color: var(--text-muted); }
+.adopt-table td:first-child { color: var(--text); }
+.adopt-table .tnum { font-variant-numeric: tabular-nums; }
+.adopt-table tr[data-failed='true'] td { color: var(--text-faint); }
+
+@media (max-width: 767px) {
+  /* One column: label, bar, then the action beneath it. */
+  .adopt-row { grid-template-columns: 1fr; }
+  .adopt-row-head { gap: 8px; }
+  .adopt-track { grid-column: 1; }
+  .adopt-scout { grid-column: 1; grid-row: auto; margin-top: 10px; justify-self: start; }
+  .adopt-name, .adopt-rate { font-size: 14px; }
+}
+
+/* ---------------------------------------------------------------------------
+   Header nav. Was an inline `display:flex; gap:24` on the element, which a
+   media query cannot override — and at six links (Adoption made six) the row
+   pushed the page to 435px at a 390px viewport. Moved here so it can wrap and
+   tighten instead.
+--------------------------------------------------------------------------- */
+.site-nav { margin-left: auto; display: flex; gap: 24px; flex-wrap: wrap; }
+@media (max-width: 767px) {
+  .site-nav { gap: 12px 14px; justify-content: flex-end; }
+}
+@media (max-width: 479px) {
+  /* Full width on its own line under the wordmark, rather than competing with
+     the brand and the wallet button for a 390px row. */
+  .site-nav { margin-left: 0; width: 100%; justify-content: flex-start; gap: 10px 14px; }
+}
