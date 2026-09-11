@@ -1,0 +1,17 @@
+{
+  "name": "@agensea/hedera-x402",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "service",
+    "agent"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=service",
+    "buy": "npm run buy --workspace=agent",
+    "build": "npm run build --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}
