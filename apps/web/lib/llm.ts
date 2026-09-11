@@ -30,6 +30,9 @@ export type LlmProvider = 'groq' | 'google' | 'anthropic' | 'openai';
  */
 export const DEFAULT_PROVIDER: LlmProvider = 'groq';
 
+/** Used when LLM_FALLBACK_PROVIDER is unset. See fallbackProvider(). */
+export const DEFAULT_FALLBACK_PROVIDER: LlmProvider = 'google';
+
 /**
  * Mid-tier, tool-calling, cheap enough to run a hackathon demo on.
  *
@@ -97,14 +100,38 @@ function isProvider(v: string): v is LlmProvider {
  * exactly one provider is actually usable.
  */
 export function activeProvider(): LlmProvider {
-  const raw = process.env.LLM_PROVIDER?.trim().toLowerCase();
-  if (!raw) return DEFAULT_PROVIDER;
+  return readProvider('LLM_PROVIDER', DEFAULT_PROVIDER);
+}
+
+/**
+ * Where to go when the primary provider's DAILY quota is gone.
+ *
+ * Defaults to google: a different vendor entirely, so its quota cannot be
+ * exhausted by the same traffic that just exhausted the primary's. Falling
+ * back to another model on the same account would share the account's limits.
+ */
+export function fallbackProvider(): LlmProvider | null {
+  const raw = process.env.LLM_FALLBACK_PROVIDER?.trim().toLowerCase();
+  if (raw === 'none' || raw === 'off') return null;
+  const provider = readProvider('LLM_FALLBACK_PROVIDER', DEFAULT_FALLBACK_PROVIDER);
+  // A fallback identical to the primary is not a fallback.
+  return provider === activeProvider() ? null : provider;
+}
+
+function readProvider(envVar: string, fallback: LlmProvider): LlmProvider {
+  const raw = process.env[envVar]?.trim().toLowerCase();
+  if (!raw) return fallback;
   if (!isProvider(raw)) {
     throw new Error(
-      `LLM_PROVIDER="${raw}" is not supported. Use one of: ${PROVIDERS.join(', ')}.`,
+      `${envVar}="${raw}" is not supported. Use one of: ${PROVIDERS.join(', ')}.`,
     );
   }
   return raw;
+}
+
+/** True when that provider's key is actually configured. */
+export function providerIsConfigured(provider: LlmProvider): boolean {
+  return !!process.env[ENV_KEY[provider]]?.trim();
 }
 
 /**
@@ -115,8 +142,7 @@ export function activeProvider(): LlmProvider {
  * whole route fail to build wherever the key is absent (CI, a preview deploy
  * without the secret, `next build` tracing the graph).
  */
-export function getModel(): LanguageModel {
-  const provider = activeProvider();
+export function getModel(provider: LlmProvider = activeProvider()): LanguageModel {
   const envVar = ENV_KEY[provider];
   const apiKey = process.env[envVar]?.trim();
 
@@ -128,7 +154,7 @@ export function getModel(): LanguageModel {
     );
   }
 
-  const modelId = activeModelId();
+  const modelId = modelIdFor(provider);
 
   switch (provider) {
     case 'groq':
@@ -142,9 +168,21 @@ export function getModel(): LanguageModel {
   }
 }
 
-/** For the UI and error messages — which model actually answered. */
+/**
+ * The model id for a provider.
+ *
+ * LLM_MODEL overrides only the PRIMARY provider's id. Applying it to the
+ * fallback too would send a Groq model id to Google and fail the retry with a
+ * 404 — the one request that most needs to succeed.
+ */
+export function modelIdFor(provider: LlmProvider): string {
+  if (provider === activeProvider()) return overrideModelId() ?? MODEL_IDS[provider];
+  return MODEL_IDS[provider];
+}
+
+/** For the UI and error messages — which model the primary provider would use. */
 export function activeModelId(): string {
-  return overrideModelId() ?? MODEL_IDS[activeProvider()];
+  return modelIdFor(activeProvider());
 }
 
 /**
@@ -161,6 +199,65 @@ export function isRateLimit(err: unknown): boolean {
   if (!e) return false;
   if (e.statusCode === 429 || e.status === 429) return true;
   return typeof e.message === 'string' && /\b429\b|rate.?limit|quota/i.test(e.message);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Rate-limit classification                                                   */
+/* -------------------------------------------------------------------------- */
+
+export type RateLimitKind = 'daily' | 'per-minute' | 'none';
+
+/**
+ * Pull every string a provider might have hidden the quota wording in.
+ *
+ * The AI SDK surfaces the raw body on `responseBody` for some providers and
+ * folds it into `message` for others, and Google nests a structured
+ * `QuotaFailure` under `data.error.details`. Searching one field misses the
+ * other, so this flattens whatever is present.
+ */
+function errorText(err: unknown): string {
+  const e = err as Record<string, unknown> | null;
+  if (!e) return '';
+  const parts: string[] = [];
+  for (const k of ['message', 'responseBody', 'body', 'detail']) {
+    const v = e[k];
+    if (typeof v === 'string') parts.push(v);
+  }
+  if (e.data != null) {
+    try {
+      parts.push(JSON.stringify(e.data));
+    } catch {
+      /* circular or otherwise unserialisable — the other fields still apply */
+    }
+  }
+  return parts.join(' ');
+}
+
+/**
+ * Daily quota, or merely a per-minute burst?
+ *
+ * The distinction decides the remedy, so it must not be guessed. A per-minute
+ * limit clears on its own in seconds, and the right response is the short
+ * backoff that already exists — switching providers for it would abandon the
+ * configured model over a hiccup. A DAILY quota does not clear until the
+ * quota window rolls over, so backing off is pointless and the only useful
+ * move is another provider.
+ *
+ * Detected by matching "per day", "TPD" or "RPD" case-insensitively, per the
+ * wording both providers actually use:
+ *   Groq   "...limit of 200000 tokens per day (TPD)..."
+ *   Google "quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+ *
+ * TPD/RPD are matched as whole words so an id or hash containing those letters
+ * cannot trip it.
+ */
+export function classifyRateLimit(err: unknown): RateLimitKind {
+  if (!isRateLimit(err)) return 'none';
+  const text = errorText(err);
+  // "PerDay" (Google's camel-case quotaId) as well as "per day" / "per-day".
+  if (/per[\s_-]?day/i.test(text)) return 'daily';
+  if (/\b(TPD|RPD)\b/i.test(text)) return 'daily';
+  return 'per-minute';
 }
 
 /**

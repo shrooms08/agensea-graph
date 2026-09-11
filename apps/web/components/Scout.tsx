@@ -10,47 +10,23 @@
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { useSearchParams } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { CHAINS, DEFAULT_CHAIN_ID, getChainById } from '@/lib/graph/chains';
+import {
+  projectLatestAnswer,
+  type EvidencePart,
+  type EvidenceQuery,
+  type Recommendation,
+  type Verdict,
+  type ViewMessage,
+} from '@/lib/scout/stream-view';
 
 const EXAMPLES = [
   'Is 56:30867 safe to hire?',
   'Find me a live BSC agent that does yield monitoring with real feedback',
   'Compare adoption across chains',
 ] as const;
-
-type Recommendation = 'hire' | 'caution' | 'avoid' | 'insufficient_data';
-
-interface Verdict {
-  agentId: string;
-  chainId: number;
-  name: string;
-  liveness: string;
-  reputationSummary: string;
-  flags: string[];
-  recommendation: Recommendation;
-  confidence: 'low' | 'medium' | 'high';
-  reasoning: string;
-}
-
-interface EvidenceQuery {
-  seq: number;
-  subgraphId: string;
-  query: string;
-  variables: Record<string, unknown>;
-  rowCount: number;
-  ms: number;
-  ok: boolean;
-  error?: string;
-}
-
-interface EvidencePart {
-  toolCallId: string;
-  toolName: string;
-  cached: boolean;
-  queries: EvidenceQuery[];
-}
 
 const REC_LABEL: Record<Recommendation, string> = {
   hire: 'Hire',
@@ -216,48 +192,50 @@ export function Scout() {
   const [chainId, setChainId] = useState<number>(useInitialChainId());
   const [input, setInput] = useState('');
 
-  const { messages, sendMessage, status, error } = useChat({
+  const { messages, sendMessage, status, error, setMessages, stop } = useChat({
     transport: new DefaultChatTransport({ api: '/api/scout' }),
   });
 
   const busy = status === 'submitted' || status === 'streaming';
 
   /**
-   * Walk every assistant part once. Verdicts come from emit_verdict tool
-   * outputs; evidence arrives as `data-evidence` parts; text is the answer.
+   * Latch that closes on submit and opens when the request settles.
+   *
+   * `status` is React state, so it is still 'ready' during the same tick as a
+   * click. Two fast clicks (or a click landing while the first submit is still
+   * being processed) both pass a `busy` check and both send. The ref flips
+   * synchronously, which `busy` alone cannot.
    */
-  const { answer, verdicts, evidence, model } = useMemo(() => {
-    let answer = '';
-    let model = '';
-    const verdicts: Verdict[] = [];
-    const evidence: EvidencePart[] = [];
+  const inFlight = useRef(false);
+  useEffect(() => {
+    if (!busy) inFlight.current = false;
+  }, [busy]);
 
-    for (const m of messages) {
-      if (m.role !== 'assistant') continue;
-      for (const part of m.parts as Array<Record<string, unknown>>) {
-        const type = part.type as string;
-        if (type === 'text') {
-          answer += (part.text as string) ?? '';
-        } else if (type === 'data-evidence') {
-          evidence.push(part.data as unknown as EvidencePart);
-        } else if (type === 'data-model') {
-          model = (part.data as { id?: string })?.id ?? '';
-        } else if (type === 'tool-emit_verdict' && part.state === 'output-available') {
-          // recorded:false means the server's duplicate guard rejected it —
-          // a second verdict for an agent already judged in this answer. It
-          // stays in the transcript for the model but must not draw a card.
-          const out = part.output as { recorded?: boolean } | undefined;
-          if (out?.recorded) verdicts.push(out as unknown as Verdict);
-        }
-      }
-    }
-    return { answer, verdicts, evidence, model };
-  }, [messages]);
+  // Abort a streaming request if the user navigates away mid-answer, so the
+  // response is not left running against the model on nobody's behalf.
+  useEffect(
+    () => () => {
+      // Braces matter: an arrow returning stop()'s Promise would make React
+      // treat the Promise as the cleanup function.
+      void stop();
+    },
+    [stop],
+  );
+
+  /** Single-answer view: the newest assistant message only, deduped. */
+  const { answer, verdicts, evidence, model } = useMemo(
+    () => projectLatestAnswer(messages as unknown as ViewMessage[]),
+    [messages],
+  );
 
   const ask = (question: string) => {
     const q = question.trim();
-    if (!q || busy) return;
+    if (!q || busy || inFlight.current) return;
+    inFlight.current = true;
     setInput(q);
+    // Replace rather than append. Without this the previous answer's cards,
+    // text and evidence stayed on screen beneath the new ones.
+    setMessages([]);
     sendMessage({ text: q }, { body: { question: q, chainId } });
   };
 
@@ -279,7 +257,8 @@ export function Scout() {
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask about an agent's trustworthiness…"
             aria-label="Question for Scout"
-            disabled={busy}
+            readOnly={busy}
+            aria-busy={busy}
           />
           <button className="scout-send" type="submit" disabled={busy || !input.trim()}>
             {busy ? 'Working…' : 'Ask Scout'}
@@ -315,7 +294,10 @@ export function Scout() {
               type="button"
               className="scout-chip scout-example"
               disabled={busy}
-              onClick={() => ask(ex)}
+              // Fills the input only. This used to call ask() directly, so a
+              // user who clicked a chip and then pressed Ask Scout submitted
+              // the same question twice — the double-card bug.
+              onClick={() => setInput(ex)}
             >
               {ex}
             </button>

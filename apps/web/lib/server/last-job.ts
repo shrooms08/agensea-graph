@@ -61,44 +61,107 @@ async function latestJobId(): Promise<number> {
   return Number(BigInt(((await r.json()) as { result: string }).result));
 }
 
-async function scan(): Promise<LastJob | null> {
-  const configJobs = new Map(FIRST_PARTY_AGENTS.flatMap((a) => a.jobs.map((j) => [Number(j.jobId), { agent: a, job: j }] as const)));
+type ConfigJobs = Map<number, { agent: (typeof FIRST_PARTY_AGENTS)[number]; job: (typeof FIRST_PARTY_AGENTS)[number]['jobs'][number] }>;
+
+const configJobIndex = (): ConfigJobs =>
+  new Map(FIRST_PARTY_AGENTS.flatMap((a) => a.jobs.map((j) => [Number(j.jobId), { agent: a, job: j }] as const)));
+
+/**
+ * Verify ONE job id and render it, or return null if it does not qualify.
+ *
+ * Lifted verbatim out of the old walk body so both the direct lookup and the
+ * fallback walk run identical checks — provider match, COMPLETED status, and
+ * the same hash comparison against either the config deliverableHash or the
+ * recomputed manifest hash. Nothing here is new; only the caller changed.
+ */
+async function verifyJob(id: number, configJobs: ConfigJobs): Promise<LastJob | null> {
+  const chainJob = await getErc8183Job(BNB_TESTNET, BigInt(id));
+  if (String((chainJob as { provider?: string }).provider ?? '').toLowerCase() !== PROVIDER) return null;
+  if (chainJob.statusName !== 'COMPLETED') return null;
+
+  const cfg = configJobs.get(id);
+  if (cfg) {
+    if (chainJob.deliverable.toLowerCase() !== cfg.job.deliverableHash.toLowerCase()) return null;
+    if (!cfg.job.settleTx) return null; // not fully documented — not renderable with full fields
+    return { jobId: String(id), agentId: cfg.agent.agentId, agentName: cfg.agent.name, demo: false,
+             analysisMs: cfg.job.analysisMs, settleTx: cfg.job.settleTx, measuredAt: new Date().toISOString() };
+  }
+
+  // Demo hire: verify against the persisted manifest, or skip.
+  const { rows } = await sbSelect<{ agent_id: number; manifest: DeliverableManifest }>(
+    'demo_deliverables', { query: `select=agent_id,manifest&job_id=eq.${id}`, range: [0, 0], revalidate: FOOTER_REVALIDATE });
+  const row = rows[0];
+  if (!row) return null;
+  if (manifestHash(row.manifest).toLowerCase() !== chainJob.deliverable.toLowerCase()) return null;
+  const agent = byId(row.agent_id);
+  if (!agent) return null;
+  return { jobId: String(id), agentId: agent.agentId, agentName: agent.name, demo: true,
+           measuredAt: new Date().toISOString() };
+}
+
+/**
+ * Ask Supabase which of OUR jobs is newest, then verify exactly that one.
+ *
+ * This replaced a blind walk down from the on-chain job counter. The walk was
+ * correct when written and then silently stopped finding anything: it examined
+ * MAX_WALK=25 ids below the counter, and other people's jobs pushed the
+ * counter ~70 ids past our newest recorded hire, so the window no longer
+ * contained a single job of ours and the strip read "unavailable" for weeks.
+ *
+ * A lookup keyed on our own records cannot drift that way — it asks "what is
+ * the newest job we recorded?" instead of "is one of ours near the top?".
+ * It is also one indexed query plus one eth_call rather than up to 25
+ * sequential eth_calls against a 15s deadline.
+ *
+ * A few rows rather than strictly one, because a row that fails verification
+ * must be skipped exactly as the walk skipped it — otherwise one unverifiable
+ * hire would blank the strip while older good ones sit right behind it.
+ */
+const DIRECT_CANDIDATES = 5;
+
+async function directLookup(configJobs: ConfigJobs): Promise<LastJob | null> {
+  const { rows } = await sbSelect<{ job_id: number }>('demo_deliverables', {
+    query: 'select=job_id&order=job_id.desc',
+    range: [0, DIRECT_CANDIDATES - 1],
+    revalidate: FOOTER_REVALIDATE,
+  });
+  if (rows.length === 0) return null;
+
+  // Config jobs are ours too, and one could outrank the newest demo hire.
+  // Merge both sources and take them strictly newest-first.
+  const candidates = [...new Set([...rows.map((r) => Number(r.job_id)), ...configJobs.keys()])]
+    .filter((id) => Number.isInteger(id) && id > 0)
+    .sort((a, b) => b - a)
+    .slice(0, DIRECT_CANDIDATES);
+
+  for (const id of candidates) {
+    const hit = await verifyJob(id, configJobs);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/**
+ * Fallback only: the original walk down from the counter.
+ *
+ * Kept for the case where Supabase returns nothing at all — an outage, or a
+ * fresh environment with no recorded hires — where a job of ours near the top
+ * of the counter is still the best available answer.
+ */
+async function scan(configJobs: ConfigJobs): Promise<LastJob | null> {
   const latest = await latestJobId();
-
   for (let id = latest; id > latest - MAX_WALK && id > 0; id--) {
-    const chainJob = await getErc8183Job(BNB_TESTNET, BigInt(id));
-    if (String((chainJob as { provider?: string }).provider ?? '').toLowerCase() !== PROVIDER) continue;
-    if (chainJob.statusName !== 'COMPLETED') continue;
-
-    const cfg = configJobs.get(id);
-    if (cfg) {
-      if (chainJob.deliverable.toLowerCase() !== cfg.job.deliverableHash.toLowerCase()) continue;
-      if (!cfg.job.settleTx) continue; // not fully documented — not renderable with full fields
-      return { jobId: String(id), agentId: cfg.agent.agentId, agentName: cfg.agent.name, demo: false,
-               analysisMs: cfg.job.analysisMs, settleTx: cfg.job.settleTx, measuredAt: new Date().toISOString() };
-    }
-
-    // Demo hire: verify against the persisted manifest, or skip.
-    // Explicit revalidate: sbSelect defaults to 60s, and because this runs in the
-    // root layout a lower value drags EVERY route's interval down with it — the
-    // build reported 1m for the whole site until this was set.
-    const { rows } = await sbSelect<{ agent_id: number; manifest: DeliverableManifest }>(
-      'demo_deliverables', { query: `select=agent_id,manifest&job_id=eq.${id}`, range: [0, 0], revalidate: FOOTER_REVALIDATE });
-    const row = rows[0];
-    if (!row) continue;
-    if (manifestHash(row.manifest).toLowerCase() !== chainJob.deliverable.toLowerCase()) continue;
-    const agent = byId(row.agent_id);
-    if (!agent) continue;
-    return { jobId: String(id), agentId: agent.agentId, agentName: agent.name, demo: true,
-             measuredAt: new Date().toISOString() };
+    const hit = await verifyJob(id, configJobs);
+    if (hit) return hit;
   }
   return null;
 }
 
 export async function readLastJob(): Promise<LastJob | null> {
   try {
+    const configJobs = configJobIndex();
     return (await Promise.race([
-      scan(),
+      directLookup(configJobs).then((hit) => hit ?? scan(configJobs)),
       new Promise<null>((_, rej) => setTimeout(() => rej(new Error('last-job deadline')), DEADLINE_MS)),
     ])) as LastJob | null;
   } catch {

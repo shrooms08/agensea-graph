@@ -36,7 +36,17 @@ import {
   searchAgents,
   toCompositeId,
 } from '@/lib/graph/queries';
-import { activeModelId, getModel, isRateLimit, modelProviderOptions } from '@/lib/llm';
+import {
+  activeProvider,
+  classifyRateLimit,
+  fallbackProvider,
+  getModel,
+  isRateLimit,
+  modelIdFor,
+  modelProviderOptions,
+  providerIsConfigured,
+  type LlmProvider,
+} from '@/lib/llm';
 import { computeTrustSignals } from '@/lib/scout/analysis';
 
 export const runtime = 'nodejs';
@@ -445,9 +455,9 @@ export async function POST(req: Request) {
     );
   }
 
-  let model;
+  const primary = activeProvider();
   try {
-    model = getModel();
+    getModel(primary);
   } catch (err) {
     // A missing API key is a configuration problem, not a model failure — 503
     // naming the variable beats a stream that dies with no explanation.
@@ -455,19 +465,29 @@ export async function POST(req: Request) {
   }
 
   /**
+   * Which provider ended up answering. Mutable because a daily-quota 429 on
+   * the primary hands the whole request to the fallback, and every message
+   * the user sees afterwards — the "answered by" line, any error text — has
+   * to name the model that really ran, not the one we set out to use.
+   */
+  let answeringProvider: LlmProvider = primary;
+
+  /**
    * Shown to the user, so it has to be useful — and must never leak the
    * gateway URL, which carries the API key in its path. GraphError messages
    * are already redacted at the client layer.
    */
   const describe = (err: unknown): string => {
+    const who = modelIdFor(answeringProvider);
     if (isRateLimit(err)) {
-      return (
-        `${activeModelId()} is rate limited (429). The free tier allows only a few requests ` +
-        `per minute — wait a minute and ask again.`
-      );
+      return classifyRateLimit(err) === 'daily'
+        ? `${who} has exhausted its free-tier quota for today, and no fallback provider `
+          + `answered either. Set LLM_FALLBACK_PROVIDER, or try again tomorrow.`
+        : `${who} is rate limited (429). The free tier allows only a few requests per `
+          + `minute — wait a minute and ask again.`;
     }
     if ((err as { statusCode?: number } | null)?.statusCode === 503) {
-      return `${activeModelId()} is temporarily overloaded (503). Try again in a moment.`;
+      return `${who} is temporarily overloaded (503). Try again in a moment.`;
     }
     return `Scout failed: ${err instanceof Error ? err.message : String(err)}`;
   };
@@ -515,19 +535,13 @@ export async function POST(req: Request) {
 
   const stream = createUIMessageStream({
     execute: async ({ writer }) => {
-      // Announce the model that is actually answering. The page is statically
-      // rendered, so anything it printed about the model would be frozen at
-      // build time — and LLM_MODEL exists precisely so the model can change at
-      // runtime. Sending it per-request is the only version that stays true.
-      writer.write({ type: 'data-model', data: { id: activeModelId() } });
-
       const tools = makeTools(writer);
 
       const providerOptions = modelProviderOptions();
 
-      const runStream = () =>
+      const runStream = (provider: LlmProvider) =>
         streamText({
-          model,
+          model: getModel(provider),
           system: SYSTEM,
           stopWhen: stepCountIs(8),
           tools,
@@ -556,7 +570,18 @@ export async function POST(req: Request) {
         });
 
       /**
-       * One retry, for 429 only — without giving up streaming.
+       * Recovery from a 429, WITHOUT giving up streaming — and the remedy
+       * depends on which kind of 429 it is.
+       *
+       *   per-minute : clears by itself in seconds. Wait 12s and retry the
+       *                SAME provider. Switching would abandon the configured
+       *                model over a hiccup. 12s rather than a full minute
+       *                because it must fit inside DEADLINE_MS and still leave
+       *                time to answer.
+       *   daily      : does not clear until the quota window rolls over, so
+       *                waiting is pointless. Hand the whole request to
+       *                LLM_FALLBACK_PROVIDER — a different vendor, so its
+       *                quota cannot have been spent by the same traffic.
        *
        * The probe is `await result.warnings`, which settles once the provider
        * has actually responded and REJECTS on a 429, but does not buffer any
@@ -564,19 +589,36 @@ export async function POST(req: Request) {
        * catch the 429 — but only by generating the whole answer first, which
        * turns the stream into one late blob and defeats the streaming UI.
        *
-       * The wait is 12s, not the full 60s quota window: it has to fit inside
-       * DEADLINE_MS alongside the SDK's own backoff and still leave time to
-       * answer. A second 429 is reported, not retried again.
+       * One recovery attempt only; a second 429 is reported.
        */
-      let result = runStream();
+      let result = runStream(primary);
       try {
         await result.warnings;
       } catch (err) {
         if (!isRateLimit(err)) throw err;
-        await sleep(12_000);
-        result = runStream();
-        await result.warnings;
+
+        const kind = classifyRateLimit(err);
+        const fallback = fallbackProvider();
+
+        if (kind === 'daily' && fallback && providerIsConfigured(fallback)) {
+          answeringProvider = fallback;
+          result = runStream(fallback);
+          await result.warnings;
+        } else {
+          // per-minute, or no usable fallback: back off and retry the same
+          // provider. If this was a daily quota with no fallback the retry
+          // will fail again, and describe() then says so explicitly rather
+          // than blaming a per-minute limit.
+          await sleep(12_000);
+          result = runStream(primary);
+          await result.warnings;
+        }
       }
+
+      // Announced only once the provider is SETTLED. Writing it before the
+      // run would name the primary even on a request the fallback answered,
+      // which is exactly the claim this line exists to make truthfully.
+      writer.write({ type: 'data-model', data: { id: modelIdFor(answeringProvider) } });
 
       // onError is needed HERE as well as on createUIMessageStream: an error
       // raised inside the merged stream is masked by toUIMessageStream's own
@@ -608,8 +650,8 @@ export async function POST(req: Request) {
           delta:
             `\n\n_(Scout ran out of time at ${Math.round(DEADLINE_MS / 1000)}s and stopped ` +
             `before writing its summary. Any verdict above is complete and backed by the ` +
-            `queries in Evidence — ${activeModelId()} on Groq's free tier is slow and highly ` +
-            `variable. Re-ask to get the summary.)_`,
+            `queries in Evidence — ${modelIdFor(answeringProvider)} on a free tier is slow ` +
+            `and highly variable. Re-ask to get the summary.)_`,
         });
       }
     },
