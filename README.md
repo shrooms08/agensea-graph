@@ -235,11 +235,9 @@ rollup per chain, five BSC agent names, and a full trust profile as JSON.
 
 ## Demo video
 
-<!-- TODO: paste the ETHGlobal demo video link here before submitting -->
-_To be added._
+**https://youtu.be/l2mFW1gmD4M**
 
 ## Licence
 
-**Not yet licensed.** This repository has no `LICENSE` file. The Continuity pool and The
-Graph's track both expect open source, so a licence (MIT or Apache-2.0) should be added
-before submitting — until then "open source" is an intention, not a grant.
+**MIT** — see [LICENSE](./LICENSE). Free to use, modify and redistribute with attribution,
+which is what the Continuity pool and The Graph's track mean by open source.

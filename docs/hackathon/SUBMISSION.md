@@ -6,7 +6,8 @@ Draft text for the ETHOnline 2026 submission form. Every figure here matches the
 - **Repo:** https://github.com/shrooms08/agensea-graph
 - **Live:** https://agensea-graph.vercel.app · [/scout](https://agensea-graph.vercel.app/scout) · [/adoption](https://agensea-graph.vercel.app/adoption)
 - **Pool:** Continuity ("Extend Open Source"). Pre-existing work is tagged `pre-hackathon-baseline` (`e0d1392`); only work after that tag is submitted.
-- **Demo video:** _TODO — paste link_
+- **Demo video:** https://youtu.be/l2mFW1gmD4M
+- **Licence:** MIT — [LICENSE](../../LICENSE)
 
 ---
 
